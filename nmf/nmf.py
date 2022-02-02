@@ -8,58 +8,9 @@ __status__ = 'Development'
 
 import logging
 import numpy as np
-from scipy.optimize import nnls
 
 
 logger = logging.getLogger(__name__)
-
-
-def cost(V, W, H):
-    mask = V > 0.0  # pd.DataFrame(V).notnull().values
-    #logger.debug('Mask: %s', mask)
-    WH = np.dot(W, H)
-    WH_mask = WH[mask]
-    #logger.debug('WH_mask: %s', WH_mask)
-    A_mask = V[mask]
-    #logger.debug('A_mask: %s', WH_mask)
-    A_WH_mask = A_mask - WH_mask
-    # Since now A_WH_mask is a vector, we use L2 instead of Frobenius norm for matrix
-    return np.linalg.norm(A_WH_mask, 2)
-
-
-def nmf_nnls(V, k, num_iter=1000, seed=None):
-    rows, columns = V.shape
-
-    # define the random seed
-    if seed is not None:
-        np.random.seed(seed)
-
-    # Create W and H
-    W = np.abs(np.random.uniform(size=(rows, k)))
-    H = np.abs(np.random.uniform(size=(k, columns)))
-    W = np.divide(W, k*W.max())
-    H = np.divide(H, k*H.max())
-
-    # Optimize
-    #num_display_cost = max(int(num_iter/10), 1)
-    for i in range(num_iter):
-        if i % 2 == 0:
-            # Learn H, given A and W
-            for j in range(columns):
-                mask_rows = V[:, j] > 0.0  # pd.Series(A[:,j]).notnull()
-                H[:, j] = nnls(W[mask_rows], V[:, j][mask_rows])[0]
-        else:
-            for j in range(rows):
-                mask_rows = V[j, :] > 0.0  # pd.Series(A[j,:]).notnull()
-                W[j, :] = nnls(H.transpose()[mask_rows], V[j, :][mask_rows])[0]
-        #WH = np.dot(W, H)
-        #c = cost(V, W, H)
-        # if i % num_display_cost == 0:
-        #    logger.debug('%s: %s', i, c)
-
-    return W, H, cost(V, W, H)
-
-# regularized non-negative matrix factorization
 
 
 def rwnmf(X, k, alpha=0.1, tol_fit_improvement=1e-4, tol_fit_error=1e-4, num_iter=1000, seed=None):
@@ -160,3 +111,44 @@ def nmf_mu(X, k, n=1000, l=1E-3, seed=None):
             break
     
     return Xr, W, H, cost
+
+
+def nmf_mu_kl(X, k, n=100, l=1E-3, seed=None):
+    if isinstance(seed,int):
+        np.random.seed(seed)
+    
+    rows, columns = X.shape
+    eps = np.finfo(float).eps
+
+    # Create W and H
+    #avg = np.sqrt(X.mean() / k)
+    
+    W = np.abs(np.random.uniform(size=(rows, k)))
+    #W = avg * np.maximum(W, eps)
+    W = np.maximum(W, eps)
+    W = np.divide(W, k*W.max())
+
+    H = np.abs(np.random.uniform(size=(k, columns)))
+    #H = avg * np.maximum(H, eps)
+    H = np.maximum(H, eps)
+    H = np.divide(H, k*H.max())
+
+    # Create a Mask
+    M = X > 0.0
+
+    # H = H .* (W' * (V ./ (W*H))) ./ sum(W',2)
+    # W = W .* ((V ./ (W*H)) * H') ./ sum(H',1)
+
+    for _ in range(n):
+        H = H * (W.T @ (X / (W@H))) / np.sum(W.T, axis = 1)
+        H = np.maximum(H, eps)
+        
+        W = W * ((X / (W@H)) @ H.T) / np.sum(H.T, axis = 0)
+        W = np.maximum(W, eps)
+        
+        #Xr = M * (W @ H)
+        #cost = np.sum(MX * np.log(MX/ Xr) - MX + Xr)
+        #if cost <= l:
+        #    break
+    
+    return W, H
