@@ -140,10 +140,10 @@ def nmf_mu_kl(X, k, n=100, l=1E-3, seed=None):
     # W = W .* ((V ./ (W*H)) * H') ./ sum(H',1)
 
     for _ in range(n):
-        H = H * (W.T @ (X / (W@H))) / np.sum(W.T, axis = 1)
+        H = H * (W.T @ (M*(X / (W@H)))) / np.sum(W.T, axis = 1)
         H = np.maximum(H, eps)
         
-        W = W * ((X / (W@H)) @ H.T) / np.sum(H.T, axis = 0)
+        W = W * ((M+(X / (W@H))) @ H.T) / np.sum(H.T, axis = 0)
         W = np.maximum(W, eps)
         
         #Xr = M * (W @ H)
