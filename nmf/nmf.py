@@ -115,6 +115,11 @@ def nmf_mu(X, k, n=1000, l=1E-3, seed=None):
     return Xr, W, H, cost
 
 
+def cost_kl(A, B):
+    M = A > 0.0
+    return np.sum(A[M]*np.log(A[M]/B[M])-A[M]+B[M])
+
+
 def nmf_mu_kl(X, k, n=100, l=1E-3, seed=None):
     if isinstance(seed, int):
         np.random.seed(seed)

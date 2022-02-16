@@ -20,6 +20,7 @@ class TestSum(unittest.TestCase):
         Xr, W, H = nmf.nmf_mu_kl(X, k=3)
         print(X)
         print(Xr)
+        print(nmf.cost_kl(X, Xr))
 
         np.testing.assert_almost_equal(X, Xr, decimal=1)
 
