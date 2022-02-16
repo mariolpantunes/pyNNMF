@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 
 
 def rwnmf(X, k, alpha=0.1, tol_fit_improvement=1e-4, tol_fit_error=1e-4, num_iter=1000, seed=None):
-    if isinstance(seed,int):
+    if isinstance(seed, int):
         np.random.seed(seed)
-    
+
     # applies regularized weighted nmf to matrix X with k factors
     # ||X-UV^T||
     eps = np.finfo(float).eps
@@ -77,15 +77,15 @@ def rwnmf(X, k, alpha=0.1, tol_fit_improvement=1e-4, tol_fit_error=1e-4, num_ite
 
 
 def nmf_mu(X, k, n=1000, l=1E-3, seed=None):
-    if isinstance(seed,int):
+    if isinstance(seed, int):
         np.random.seed(seed)
-    
+
     rows, columns = X.shape
     eps = np.finfo(float).eps
 
     # Create W and H
     #avg = np.sqrt(X.mean() / k)
-    
+
     W = np.abs(np.random.uniform(size=(rows, k)))
     #W = avg * np.maximum(W, eps)
     W = np.maximum(W, eps)
@@ -100,29 +100,31 @@ def nmf_mu(X, k, n=1000, l=1E-3, seed=None):
     M = X > 0.0
 
     for _ in range(n):
-        W = np.multiply(W, np.divide((M*X)@H.T-l*np.linalg.norm(W, 'fro'), (M*(W@H))@H.T))
+        W = np.multiply(W, np.divide(
+            (M*X)@H.T-l*np.linalg.norm(W, 'fro'), (M*(W@H))@H.T))
         W = np.maximum(W, eps)
-        H = np.multiply(H, np.divide(W.T@(M*X)-l*np.linalg.norm(H, 'fro'), W.T@(M*(W@H))))
+        H = np.multiply(H, np.divide(
+            W.T@(M*X)-l*np.linalg.norm(H, 'fro'), W.T@(M*(W@H))))
         H = np.maximum(H, eps)
 
         Xr = W @ H
         cost = np.linalg.norm((M*X) - (M*Xr), 'fro')
         if cost <= l:
             break
-    
+
     return Xr, W, H, cost
 
 
 def nmf_mu_kl(X, k, n=100, l=1E-3, seed=None):
-    if isinstance(seed,int):
+    if isinstance(seed, int):
         np.random.seed(seed)
-    
+
     rows, columns = X.shape
     eps = np.finfo(float).eps
 
     # Create W and H
     #avg = np.sqrt(X.mean() / k)
-    
+
     W = np.abs(np.random.uniform(size=(rows, k)))
     #W = avg * np.maximum(W, eps)
     W = np.maximum(W, eps)
@@ -136,19 +138,25 @@ def nmf_mu_kl(X, k, n=100, l=1E-3, seed=None):
     # Create a Mask
     M = X > 0.0
 
+    #print(f'W {W.shape} H {H.shape} M {M.shape}')
+
     # H = H .* (W' * (V ./ (W*H))) ./ sum(W',2)
     # W = W .* ((V ./ (W*H)) * H') ./ sum(H',1)
 
     for _ in range(n):
-        H = H * (W.T @ (M*(X / (W@H)))) / np.sum(W.T, axis = 1)
+        I = np.where(X==0, W@H, X)
+        H = H * (W.T @ (I / (W@H)) / np.sum(W.T, axis=1)[:,None])
         H = np.maximum(H, eps)
-        
-        W = W * ((M+(X / (W@H))) @ H.T) / np.sum(H.T, axis = 0)
+
+        I = np.where(X==0, W@H, X)
+        W = W * ((I / (W@H) @ H.T) / np.sum(H.T, axis=0))
         W = np.maximum(W, eps)
-        
+
         #Xr = M * (W @ H)
-        #cost = np.sum(MX * np.log(MX/ Xr) - MX + Xr)
-        #if cost <= l:
+        #cost = np.sum(MX * np.log(MX/Xr) - MX + Xr)
+        # if cost <= l:
         #    break
-    
-    return W, H
+
+    Xr = W @ H
+
+    return Xr, W, H

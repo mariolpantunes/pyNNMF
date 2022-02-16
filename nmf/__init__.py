@@ -1,1 +1,1 @@
-import nmf.nmf
+import nmf.nmf as nmf
