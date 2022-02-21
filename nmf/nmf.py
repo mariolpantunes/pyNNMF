@@ -76,6 +76,12 @@ def rwnmf(X, k, alpha=0.1, tol_fit_improvement=1e-4, tol_fit_error=1e-4, num_ite
     return Xr, U, V, error
 
 
+def cost_fb(A, B, M=None):
+    if M is None:
+        M = A > 0.0
+    return np.linalg.norm((M*A) - (M*B), 'fro')
+
+
 def nmf_mu(X, k, n=1000, l=1E-3, seed=None):
     if isinstance(seed, int):
         np.random.seed(seed)
@@ -108,21 +114,27 @@ def nmf_mu(X, k, n=1000, l=1E-3, seed=None):
         H = np.maximum(H, eps)
 
         Xr = W @ H
-        cost = np.linalg.norm((M*X) - (M*Xr), 'fro')
+        cost = cost_fb(X, Xr, M)
         if cost <= l:
             break
 
     return Xr, W, H, cost
 
+# Kullback–Leibler
 
-def cost_kl(A, B):
-    M = A > 0.0
+
+def cost_kl(A, B, M=None):
+    if M is None:
+        M = A > 0.0
     return np.sum(A[M]*np.log(A[M]/B[M])-A[M]+B[M])
 
 
-def nmf_mu_kl(X, k, n=100, l=1E-3, seed=None):
+def nmf_mu_kl(X, k, n=100, l=1E-3, seed=None, r=20):
     if isinstance(seed, int):
         np.random.seed(seed)
+    
+    # Create a Mask
+    M = X > 0.0
 
     rows, columns = X.shape
     eps = np.finfo(float).eps
@@ -140,13 +152,29 @@ def nmf_mu_kl(X, k, n=100, l=1E-3, seed=None):
     H = np.maximum(H, eps)
     H = np.divide(H, k*H.max())
 
-    # Create a Mask
-    M = X > 0.0
+    if seed is None:
 
-    #print(f'W {W.shape} H {H.shape} M {M.shape}')
+        Xr = W @ H
+        cost = cost_kl(X, Xr, M)
 
-    # H = H .* (W' * (V ./ (W*H))) ./ sum(W',2)
-    # W = W .* ((V ./ (W*H)) * H') ./ sum(H',1)
+        for _ in range(r):
+            Wt = np.abs(np.random.uniform(size=(rows, k)))
+            #W = avg * np.maximum(W, eps)
+            Wt = np.maximum(Wt, eps)
+            Wt = np.divide(Wt, k*Wt.max())
+
+            Ht = np.abs(np.random.uniform(size=(k, columns)))
+            #H = avg * np.maximum(H, eps)
+            Ht = np.maximum(Ht, eps)
+            Ht = np.divide(Ht, k*Ht.max())
+
+            Xr = Wt @ Ht
+            cost_temp = cost_kl(X, Xr, M)
+
+            if cost_temp < cost:
+                W = Wt
+                H = Ht
+                cost = cost_temp
 
     for _ in range(n):
         I = np.where(X==0, W@H, X)
@@ -157,11 +185,85 @@ def nmf_mu_kl(X, k, n=100, l=1E-3, seed=None):
         W = W * ((I / (W@H) @ H.T) / np.sum(H.T, axis=0))
         W = np.maximum(W, eps)
 
-        #Xr = M * (W @ H)
-        #cost = np.sum(MX * np.log(MX/Xr) - MX + Xr)
-        # if cost <= l:
-        #    break
+        Xr = W @ H
+        cost = cost_kl(X, Xr)
+        if cost <= l:
+            break
 
-    Xr = W @ H
+    return Xr, W, H, cost
 
-    return Xr, W, H
+# Itakura-Saito
+
+def cost_is(A, B, M=None):
+    if M is None:
+        M = A > 0.0
+    return np.sum((A[M]/B[M])-np.log(A[M]/B[M])-1)
+
+
+def nmf_mu_is(X, k, n=100, l=1E-3, seed=None, r=20):
+    if isinstance(seed, int):
+        np.random.seed(seed)
+    
+    # Create a Mask
+    M = X > 0.0
+
+    rows, columns = X.shape
+    eps = np.finfo(float).eps
+
+    # Create W and H
+    #avg = np.sqrt(X.mean() / k)
+
+    W = np.abs(np.random.uniform(size=(rows, k)))
+    #W = avg * np.maximum(W, eps)
+    W = np.maximum(W, eps)
+    W = np.divide(W, k*W.max())
+
+    H = np.abs(np.random.uniform(size=(k, columns)))
+    #H = avg * np.maximum(H, eps)
+    H = np.maximum(H, eps)
+    H = np.divide(H, k*H.max())
+
+    if seed is None:
+
+        Xr = W @ H
+        cost = cost_is(X, Xr, M)
+
+        for _ in range(r):
+            Wt = np.abs(np.random.uniform(size=(rows, k)))
+            #W = avg * np.maximum(W, eps)
+            Wt = np.maximum(Wt, eps)
+            Wt = np.divide(Wt, k*Wt.max())
+
+            Ht = np.abs(np.random.uniform(size=(k, columns)))
+            #H = avg * np.maximum(H, eps)
+            Ht = np.maximum(Ht, eps)
+            Ht = np.divide(Ht, k*Ht.max())
+
+            Xr = Wt @ Ht
+            cost_temp = cost_is(X, Xr, M)
+
+            if cost_temp < cost:
+                W = Wt
+                H = Ht
+                cost = cost_temp
+
+    # W = W .* sqrt.(((V ./ (W*H))*(H./sum(W*H,1))') ./(sum((H./sum(W*H,1))',1)))
+    # H = H .* sqrt.(((W ./ sum(W*H,2))' * (V./(W*H)) ./ (sum((W ./ sum(W*H,2))',2))))
+
+    for _ in range(n):
+        I = np.where(X==0, W@H, X)
+        #H = H * (W.T @ (I / (W@H)) / np.sum(W.T, axis=1)[:,None])
+        H = H * np.sqrt(((W / np.sum(W@H, axis=1)[:,None]).T @ (I / (W@H)) / (np.sum((W / np.sum(W@H, axis=1)[:,None]).T, axis=1)[:,None])))
+        H = np.maximum(H, eps)
+
+        I = np.where(X==0, W@H, X)
+        #W = W * ((I / (W@H) @ H.T) / np.sum(H.T, axis=0))
+        W = W * np.sqrt(((I / (W@H)) @ (H / np.sum(W@H, axis=0)).T) / (np.sum((H / np.sum(W@H, axis=0)).T, axis = 0)))
+        W = np.maximum(W, eps)
+
+        Xr = W @ H
+        cost = cost_is(X, Xr)
+        if cost <= l:
+            break
+
+    return Xr, W, H, cost
