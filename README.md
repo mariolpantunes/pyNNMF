@@ -1,4 +1,4 @@
-# Non-Negative Matrix Factorization (NMF)
+# pyNNMF - Non-Negative Matrix Factorization (NNMF)
 
 Library for computing Non-Negative Matrix Factorisation with missing values imputation.
 
@@ -12,4 +12,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Status
 
-![Python CI](https://github.com/mariolpantunes/nmf/workflows/Python%20CI/badge.svg)
+![Python CI](https://github.com/mariolpantunes/pyNNMF/workflows/Python%20CI/badge.svg)

@@ -2,7 +2,6 @@ import unittest
 import numpy as np
 import nmf.nmf as nmf
 
-
 class TestSum(unittest.TestCase):
     def test_nmf_mu_00(self):
         X = np.random.rand(5,5)
