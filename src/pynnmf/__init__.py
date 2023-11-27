@@ -1,1 +1,1 @@
-import nmf.nmf as nmf
+import pynnmf.pynnmf as pynnmf
