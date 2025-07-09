@@ -71,7 +71,7 @@ def rwnmf(X, k, alpha=0.1, tol_fit_improvement=1e-4, tol_fit_error=1e-4, num_ite
 
     if not early_stop:
         Xr = U @ V.T
-        error = np.linalg.norm(X - Xr, 'fro')
+        error = np.linalg.norm(X - Xr, ord='fro')
 
     return Xr, U, V, error
 
@@ -79,7 +79,7 @@ def rwnmf(X, k, alpha=0.1, tol_fit_improvement=1e-4, tol_fit_error=1e-4, num_ite
 def cost_fb(A, B, M=None):
     if M is None:
         M = A > 0.0
-    return np.linalg.norm((M*A) - (M*B), 'fro')
+    return np.linalg.norm((M*A) - (M*B), ord='fro')
 
 
 def nmf_mu(X, k, n=1000, l=1E-3, seed=None):
