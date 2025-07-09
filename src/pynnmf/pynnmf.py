@@ -78,8 +78,18 @@ def rwnmf(X, k, alpha=0.1, tol_fit_improvement=1e-4, tol_fit_error=1e-4, num_ite
 
 def cost_fb(A, B, M=None):
     if M is None:
-        M = A > 0.0
-    return np.linalg.norm((M*A) - (M*B), ord='fro')
+        if np.any(np.isnan(A)):
+            M = np.isnan(A)
+            A[M] = 0
+            M = ~M
+            cost = np.linalg.norm((M*A) - (M*B), ord='fro')
+            A[~M] = np.nan
+        else:
+            M = A > 0.0
+            cost = np.linalg.norm((M*A) - (M*B), ord='fro')
+    else:
+        cost = np.linalg.norm((M*A) - (M*B), ord='fro')
+    return cost
 
 
 def nmf_mu(X, k, n=1000, l=1E-3, seed=None):
@@ -128,7 +138,11 @@ def nmf_mu(X, k, n=1000, l=1E-3, seed=None):
 # Kullback–Leibler
 def cost_kl(A, B, M=None):
     if M is None:
-        M = A > 0.0
+        if np.any(np.isnan(A)):
+            M = np.isnan(A)
+            M = ~M
+        else:
+            M = A > 0.0
     return np.sum(A[M]*np.log(A[M]/B[M])-A[M]+B[M])
 
 
@@ -159,7 +173,6 @@ def nmf_mu_kl(X, k, n=100, l=1E-3, seed=None, r=20):
     H = np.divide(H, k*H.max())
 
     if seed is None:
-
         Xr = W @ H
         cost = cost_kl(X, Xr, M)
 
@@ -203,8 +216,18 @@ def nmf_mu_kl(X, k, n=100, l=1E-3, seed=None, r=20):
 # Itakura-Saito
 def cost_is(A, B, M=None):
     if M is None:
-        M = A > 0.0
-    return np.sum((A[M]/B[M])-np.log(A[M]/B[M])-1)
+        if np.any(np.isnan(A)):
+            M = np.isnan(A)
+            A[M] = 0
+            M = ~M
+            cost = np.sum((A[M]/B[M])-np.log(A[M]/B[M])-1)
+            A[~M] = np.nan
+        else:
+            M = A > 0.0
+            cost = np.sum((A[M]/B[M])-np.log(A[M]/B[M])-1)
+    else:
+        cost = np.sum((A[M]/B[M])-np.log(A[M]/B[M])-1)
+    return cost
 
 
 def nmf_mu_is(X, k, n=100, l=1E-3, seed=None, r=20):
@@ -234,7 +257,6 @@ def nmf_mu_is(X, k, n=100, l=1E-3, seed=None, r=20):
     H = np.divide(H, k*H.max())
 
     if seed is None:
-
         Xr = W @ H
         cost = cost_is(X, Xr, M)
 
