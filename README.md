@@ -1,8 +1,4 @@
-<p align="center">
-  <img src="assets/logo.svg" alt="pyNNMF Logo" width="128" height="128"/>
-</p>
-
-# pyNNMF - Non-Negative Matrix Factorization (NMF)
+# <img src="assets/logo.svg" alt="logo" width="128" height="128" align="middle"> pyNNMF - Non-Negative Matrix Factorization (NMF)
 
 ![PyPI - Version](https://img.shields.io/pypi/v/pyNNMF)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pyNNMF)
@@ -67,6 +63,12 @@ PYTHONPATH=src python examples/imputation_example.py
 Benchmark execution times and validate prediction accuracy (out-of-sample RMSE/MAE) across different noise distributions and missingness ratios using your `exectimeit` library:
 ```bash
 PYTHONPATH=src python examples/validate_solvers.py --size 100 --noise gaussian --ratio 0.15
+```
+
+### 3. Initialization Comparison
+Evaluate the impact of different initialization strategies (`random`, `nndsvd`, `svd_impute`) on the convergence speed and final reconstruction error:
+```bash
+PYTHONPATH=src python examples/init_comparison.py
 ```
 
 ---
