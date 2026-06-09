@@ -1,3 +1,5 @@
+.ruff*
+.*hints
 .vscode
 
 # Byte-compiled / optimized / DLL files

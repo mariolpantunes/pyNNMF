@@ -1,41 +1,77 @@
 # coding: utf-8
+"""
+pyNNMF: Non-Negative Matrix Factorization with missing values imputation.
+Provides various solvers (MU, ALS, HALS) for different cost functions
+(Frobenius norm, Kullback-Leibler, and Itakura-Saito).
+"""
 
-__author__ = 'Mário Antunes'
-__version__ = '0.1'
-__email__ = 'mariolpantunes@gmail.com'
-__status__ = 'Development'
+__author__ = "Mário Antunes"
+__version__ = "0.2.0"
+__email__ = "mariolpantunes@gmail.com"
+__status__ = "Development"
 
 
 import logging
-import numpy as np
 
+import numpy as np
+from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
 
-def rwnmf(X, k, alpha=0.1, tol_fit_improvement=1e-4, tol_fit_error=1e-4, num_iter=1000, seed=None):
+def rwnmf(
+    X: NDArray[np.floating],
+    k: int,
+    alpha: float = 0.1,
+    tol_fit_improvement: float = 1e-4,
+    tol_fit_error: float = 1e-4,
+    num_iter: int = 1000,
+    seed: int | None = None,
+    eval_every: int = 10,
+) -> tuple[NDArray[np.floating], NDArray[np.floating], NDArray[np.floating], float]:
+    """
+    Robust Weighted Non-negative Matrix Factorization (RWNMF) with L2 regularization.
+
+    Optimizes the Frobenius norm objective function with missing values and L2 regularization:
+
+    $$D_{\\text{Fro}}(X \\parallel U V^T) = \\frac{1}{2} \\| M \\odot (X - U V^T) \\|_F^2 + \\frac{\\alpha}{2} (\\|U\\|_F^2 + \\|V\\|_F^2)$$
+
+    where $M$ is a binary mask representing observed values (1 if observed, 0 if NaN).
+
+    Optimization method: Multiplicative Update (MU) rules.
+
+    $$U \\leftarrow U \\odot \\frac{(M \\odot X) V}{(M \\odot (U V^T)) V + \\alpha U}$$
+
+    $$V \\leftarrow V \\odot \\frac{(M \\odot X)^T U}{(M \\odot (U V^T))^T U + \\alpha V}$$
+
+    Args:
+        X (np.ndarray): Target matrix of shape (m, n) with potential NaN values.
+        k (int): Number of latent components.
+        alpha (float): L2 regularization parameter. Defaults to 0.1.
+        tol_fit_improvement (float): Early stopping tolerance for reconstruction improvement. Defaults to 1e-4.
+        tol_fit_error (float): Early stopping tolerance for reconstruction error. Defaults to 1e-4.
+        num_iter (int): Maximum number of iterations. Defaults to 1000.
+        seed (int, optional): Random seed for reproducibility. Defaults to None.
+        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
+
+    Returns:
+        tuple: (Xr, U, V, error)
+            - Xr (np.ndarray): Reconstructed matrix of shape (m, n).
+            - U (np.ndarray): Left factor matrix of shape (m, k).
+            - V (np.ndarray): Right factor matrix of shape (n, k).
+            - error (float): Final Frobenius reconstruction error.
+    """
     if isinstance(seed, int):
         np.random.seed(seed)
 
-    # applies regularized weighted nmf to matrix X with k factors
-    # ||X-UV^T||
     eps = np.finfo(float).eps
     early_stop = False
 
-    # get observations matrix W
-    W = np.isnan(X)
-    # print('W')
-    # print(W)
-    X[W] = 0  # set missing entries as 0
-    # print(X)
-    W = ~W
-    # print('~W')
-    # print(W)
-    #W = X > 0.0
+    M = np.isnan(X)
+    X = X.copy()
+    X[M] = 0
+    M = ~M
 
-    # initialize factor matrices
-    #rnd = np.random.RandomState()
-    #U = rnd.rand(X.shape[0], k)
     U = np.random.uniform(size=(X.shape[0], k))
     U = np.maximum(U, eps)
 
@@ -44,115 +80,223 @@ def rwnmf(X, k, alpha=0.1, tol_fit_improvement=1e-4, tol_fit_error=1e-4, num_ite
 
     Xr = np.inf * np.ones(X.shape)
 
+    M_float = M.astype(float)
+    M_X = M_float * X
+    M_X_T = M_X.T
+
+    # Initial rec
+    rec = U @ V.T
+
     for i in range(num_iter):
-        # update U
-        U = U * np.divide(((W * X) @ V), (W * (U @ V.T) @ V + alpha * U))
+        # 1. Update U
+        rec *= M_float
+        U = U * ((M_X @ V) / (rec @ V + alpha * U))
         U = np.maximum(U, eps)
-        # update V
-        V = V * np.divide((np.transpose(W * X) @ U),
-                          (np.transpose(W * (U @ V.T)) @ U + alpha * V))
+
+        # 2. Update V
+        rec = U @ V.T
+        rec *= M_float
+        V = V * ((M_X_T @ U) / (rec.T @ U + alpha * V))
         V = np.maximum(V, eps)
 
-        # compute the resduals
-        if i % 10 == 0:
-            # compute error of current approximation and improvement
-            Xi = U @ V.T
-            fit_error = np.linalg.norm(X - Xi, 'fro')
-            fit_improvement = np.linalg.norm(Xi - Xr, 'fro')
+        # residuals evaluation
+        rec = U @ V.T
+        if i % eval_every == 0:
+            fit_error = np.linalg.norm(X - rec, "fro")
+            fit_improvement = np.linalg.norm(rec - Xr, "fro")
+            Xr = np.copy(rec)
 
-            # update reconstruction
-            Xr = np.copy(Xi)
-
-            # check if early stop criteria is met
             if fit_error < tol_fit_error or fit_improvement < tol_fit_improvement:
-                error = fit_error
                 early_stop = True
                 break
 
-    if not early_stop:
+    if early_stop:
+        Xr = rec
+    else:
         Xr = U @ V.T
-        error = np.linalg.norm(X - Xr, ord='fro')
 
+    error = np.linalg.norm(X - Xr, ord="fro")
     return Xr, U, V, error
 
 
-def cost_fb(A, B, M=None):
+def cost_fb(A: NDArray[np.floating], B: NDArray[np.floating], M: NDArray[np.floating] | None = None) -> float:
+    """
+    Compute the Frobenius norm cost between two matrices, accounting for missing values.
+
+    $$D_{\\text{Fro}}(A \\parallel B) = \\| M \\odot (A - B) \\|_F$$
+
+    where $M$ is a mask indicating observed entries.
+
+    Args:
+        A (np.ndarray): Target matrix.
+        B (np.ndarray): Reconstructed matrix.
+        M (np.ndarray, optional): Binary mask of observed elements. Defaults to None.
+
+    Returns:
+        float: Frobenius cost.
+    """
     if M is None:
         if np.any(np.isnan(A)):
             M = np.isnan(A)
-            A[M] = 0
-            M = ~M
-            cost = np.linalg.norm((M*A) - (M*B), ord='fro')
-            A[~M] = np.nan
+            A_copy = A.copy()
+            A_copy[M] = 0
+            M_not = ~M
+            cost = np.linalg.norm((M_not * A_copy) - (M_not * B), ord="fro")
         else:
-            M = A > 0.0
-            cost = np.linalg.norm((M*A) - (M*B), ord='fro')
+            M_not = A > 0.0
+            cost = np.linalg.norm((M_not * A) - (M_not * B), ord="fro")
     else:
-        cost = np.linalg.norm((M*A) - (M*B), ord='fro')
-    return cost
+        cost = np.linalg.norm((M * A) - (M * B), ord="fro")
+    return float(cost)
 
 
-def nmf_mu(X, k, n=1000, l=1E-3, seed=None):
+def nmf_mu(
+    X: NDArray[np.floating], k: int, n: int = 1000, tol: float = 1e-3, seed: int | None = None, eval_every: int = 10
+) -> tuple[NDArray[np.floating], NDArray[np.floating], NDArray[np.floating], float]:
+    """
+    Non-Negative Matrix Factorization (NMF) via Multiplicative Updates (MU) using Frobenius norm.
+
+    Optimizes the Frobenius norm objective function with L2 regularization:
+
+    $$D_{\\text{Fro}}(X \\parallel W H) = \\frac{1}{2} \\| M \\odot (X - W H) \\|_F^2 + \\frac{\\text{tol}}{2} (\\|W\\|_F^2 + \\|H\\|_F^2)$$
+
+    Multiplicative update steps:
+
+    $$W \\leftarrow W \\odot \\frac{(M \\odot X) H^T - \\text{tol} \\|W\\|_F}{(M \\odot (W H)) H^T}$$
+
+    $$H \\leftarrow H \\odot \\frac{W^T (M \\odot X) - \\text{tol} \\|H\\|_F}{W^T (M \\odot (W H))}$$
+
+    Args:
+        X (np.ndarray): Target matrix of shape (m, n).
+        k (int): Number of latent components.
+        n (int): Maximum number of iterations. Defaults to 1000.
+        tol (float): L2 regularization parameter and convergence tolerance. Defaults to 1e-3.
+        seed (int, optional): Random seed. Defaults to None.
+        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
+
+    Returns:
+        tuple: (rec, W, H, cost)
+            - rec (np.ndarray): Reconstructed matrix of shape (m, n).
+            - W (np.ndarray): Left factor matrix of shape (m, k).
+            - H (np.ndarray): Right factor matrix of shape (k, n).
+            - cost (float): Final Frobenius cost.
+    """
+
     if isinstance(seed, int):
         np.random.seed(seed)
 
     rows, columns = X.shape
     eps = np.finfo(float).eps
 
-    # Create W and H
-    #avg = np.sqrt(X.mean() / k)
-
     W = np.abs(np.random.uniform(size=(rows, k)))
-    #W = avg * np.maximum(W, eps)
     W = np.maximum(W, eps)
-    W = np.divide(W, k*W.max())
+    W = np.divide(W, k * W.max())
 
     H = np.abs(np.random.uniform(size=(k, columns)))
-    #H = avg * np.maximum(H, eps)
     H = np.maximum(H, eps)
-    H = np.divide(H, k*H.max())
+    H = np.divide(H, k * H.max())
 
-    # Create a Mask
-    #M = X > 0.0
     M = np.isnan(X)
+    X = X.copy()
     X[M] = 0
     M = ~M
+    M_float = M.astype(float)
 
-    for _ in range(n):
-        W = np.multiply(W, np.divide(
-            (M*X)@H.T-l*np.linalg.norm(W, 'fro'), (M*(W@H))@H.T))
+    # Precompute constant matrices
+    M_X = M_float * X
+    rec = W @ H
+    cost = cost_fb(X, rec, M_float)
+
+    for idx in range(n):
+        # 1. Update W
+        rec *= M_float
+        W = W * ((M_X @ H.T - tol * np.linalg.norm(W, "fro")) / (rec @ H.T))
         W = np.maximum(W, eps)
-        H = np.multiply(H, np.divide(
-            W.T@(M*X)-l*np.linalg.norm(H, 'fro'), W.T@(M*(W@H))))
+
+        # 2. Update H
+        rec = W @ H
+        rec *= M_float
+        H = H * ((W.T @ M_X - tol * np.linalg.norm(H, "fro")) / (W.T @ rec))
         H = np.maximum(H, eps)
 
-        Xr = W @ H
-        cost = cost_fb(X, Xr, M)
-        if cost <= l:
-            break
+        if idx % eval_every == 0:
+            rec = W @ H
+            cost = cost_fb(X, rec, M_float)
+            if cost <= tol:
+                break
+    else:
+        rec = W @ H
+        cost = cost_fb(X, rec, M_float)
 
     X[~M] = np.nan
-    return Xr, W, H, cost
+    return rec, W, H, cost
 
 
-# Kullback–Leibler
-def cost_kl(A, B, M=None):
+def cost_kl(A: NDArray[np.floating], B: NDArray[np.floating], M: NDArray[np.bool_] | None = None) -> float:
+    """
+    Compute the Kullback-Leibler (KL) divergence cost between two matrices.
+
+    $$D_{\\text{KL}}(A \\parallel B) = \\sum_{i,j} M_{ij} \\left( A_{ij} \\log \\frac{A_{ij}}{B_{ij}} - A_{ij} + B_{ij} \\right)$$
+
+    Args:
+        A (np.ndarray): Target matrix.
+        B (np.ndarray): Reconstructed matrix.
+        M (np.ndarray, optional): Binary mask of observed elements. Defaults to None.
+
+    Returns:
+        float: KL divergence cost.
+    """
     if M is None:
         if np.any(np.isnan(A)):
             M = np.isnan(A)
             M = ~M
         else:
             M = A > 0.0
-    return np.sum(A[M]*np.log(A[M]/B[M])-A[M]+B[M])
+    mask = M & (A > 0.0)
+    a = A[mask]
+    b = B[mask]
+    return np.sum(a * np.log(a / b) - a + b)
 
 
-def nmf_mu_kl(X, k, n=100, l=1E-3, seed=None, r=20):
+def nmf_mu_kl(
+    X: NDArray[np.floating], k: int, n: int = 100, tol: float = 1e-3, seed: int | None = None, r: int = 20, eval_every: int = 10
+) -> tuple[NDArray[np.floating], NDArray[np.floating], NDArray[np.floating], float]:
+    """
+    NMF via Multiplicative Updates (MU) minimizing the Kullback-Leibler (KL) divergence.
+
+    Optimizes the generalized KL divergence objective:
+
+    $$D_{\\text{KL}}(X \\parallel W H) = \\sum_{i,j} M_{ij} \\left( X_{ij} \\log \\frac{X_{ij}}{(W H)_{ij}} - X_{ij} + (W H)_{ij} \\right)$$
+
+    Multiplicative update steps:
+
+    $$H \\leftarrow H \\odot \\frac{W^T \\left( \\frac{M \\odot X}{W H} \\right)}{W^T M}$$
+
+    $$W \\leftarrow W \\odot \\frac{\\left( \\frac{M \\odot X}{W H} \\right) H^T}{M H^T}$$
+
+    Args:
+        X (np.ndarray): Target matrix of shape (m, n).
+        k (int): Number of latent components.
+        n (int): Maximum number of iterations. Defaults to 100.
+        tol (float): Convergence tolerance. Defaults to 1e-3.
+        seed (int, optional): Random seed. Defaults to None.
+        r (int): Number of restarts for initial factor selection. Defaults to 20.
+        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
+
+    Returns:
+        tuple: (rec, W, H, cost)
+            - rec (np.ndarray): Reconstructed matrix of shape (m, n).
+            - W (np.ndarray): Left factor matrix of shape (m, k).
+            - H (np.ndarray): Right factor matrix of shape (k, n).
+            - cost (float): Final KL cost.
+    """
+
     if isinstance(seed, int):
         np.random.seed(seed)
-    
+
     # Create a Mask
-    #M = X > 0.0
     M = np.isnan(X)
+    X = X.copy()
     X[M] = 0
     M = ~M
 
@@ -160,83 +304,145 @@ def nmf_mu_kl(X, k, n=100, l=1E-3, seed=None, r=20):
     eps = np.finfo(float).eps
 
     # Create W and H
-    #avg = np.sqrt(X.mean() / k)
-
     W = np.abs(np.random.uniform(size=(rows, k)))
-    #W = avg * np.maximum(W, eps)
     W = np.maximum(W, eps)
-    W = np.divide(W, k*W.max())
+    W = np.divide(W, k * W.max())
 
     H = np.abs(np.random.uniform(size=(k, columns)))
-    #H = avg * np.maximum(H, eps)
     H = np.maximum(H, eps)
-    H = np.divide(H, k*H.max())
+    H = np.divide(H, k * H.max())
+
+    cost_mask = M & (X > 0.0)
 
     if seed is None:
-        Xr = W @ H
-        cost = cost_kl(X, Xr, M)
+        rec = W @ H
+        cost = cost_kl(X, rec, M)
 
         for _ in range(r):
             Wt = np.abs(np.random.uniform(size=(rows, k)))
-            #W = avg * np.maximum(W, eps)
             Wt = np.maximum(Wt, eps)
-            Wt = np.divide(Wt, k*Wt.max())
+            Wt = np.divide(Wt, k * Wt.max())
 
             Ht = np.abs(np.random.uniform(size=(k, columns)))
-            #H = avg * np.maximum(H, eps)
             Ht = np.maximum(Ht, eps)
-            Ht = np.divide(Ht, k*Ht.max())
+            Ht = np.divide(Ht, k * Ht.max())
 
-            Xr = Wt @ Ht
-            cost_temp = cost_kl(X, Xr, M)
+            rec_temp = Wt @ Ht
+            cost_temp = cost_kl(X, rec_temp, M)
 
             if cost_temp < cost:
                 W = Wt
                 H = Ht
                 cost = cost_temp
 
-    for _ in range(n):
-        I = np.where(X==0, W@H, X)
-        H = H * (W.T @ (I / (W@H)) / np.sum(W.T, axis=1)[:,None])
+    X_zero = X == 0
+    rec = W @ H
+    cost = cost_kl(X, rec, cost_mask)
+
+    for idx in range(n):
+        X_imp = np.where(X_zero, rec, X)
+        ratio = X_imp / rec
+        W_sum = W.sum(axis=0)[:, None]
+        H = H * (W.T @ ratio / W_sum)
         H = np.maximum(H, eps)
 
-        I = np.where(X==0, W@H, X)
-        W = W * ((I / (W@H) @ H.T) / np.sum(H.T, axis=0))
+        rec = W @ H
+        X_imp = np.where(X_zero, rec, X)
+        ratio = X_imp / rec
+        H_sum = H.sum(axis=1)
+        W = W * ((ratio @ H.T) / H_sum)
         W = np.maximum(W, eps)
 
-        Xr = W @ H
-        cost = cost_kl(X, Xr)
-        if cost <= l:
-            break
+        rec = W @ H
+        if idx % eval_every == 0:
+            cost = cost_kl(X, rec, cost_mask)
+            if cost <= tol:
+                break
+    else:
+        rec = W @ H
+        cost = cost_kl(X, rec, cost_mask)
 
     X[~M] = np.nan
-    return Xr, W, H, cost
+    return rec, W, H, cost
 
 
-# Itakura-Saito
-def cost_is(A, B, M=None):
+def cost_is(A: NDArray[np.floating], B: NDArray[np.floating], M: NDArray[np.bool_] | None = None) -> float:
+    """
+    Compute the Itakura-Saito (IS) divergence cost between two matrices.
+
+    $$D_{\\text{IS}}(A \\parallel B) = \\sum_{i,j} M_{ij} \\left( \\frac{A_{ij}}{B_{ij}} - \\log \\frac{A_{ij}}{B_{ij}} - 1 \\right)$$
+
+    Args:
+        A (np.ndarray): Target matrix.
+        B (np.ndarray): Reconstructed matrix.
+        M (np.ndarray, optional): Binary mask of observed elements. Defaults to None.
+
+    Returns:
+        float: IS divergence cost.
+    """
     if M is None:
         if np.any(np.isnan(A)):
             M = np.isnan(A)
-            A[M] = 0
+            A_copy = A.copy()
+            A_copy[M] = 0
             M = ~M
-            cost = np.sum((A[M]/B[M])-np.log(A[M]/B[M])-1)
-            A[~M] = np.nan
+            mask = M & (A_copy > 0.0)
+            a = A_copy[mask]
+            b = B[mask]
+            cost = np.sum((a / b) - np.log(a / b) - 1)
         else:
             M = A > 0.0
-            cost = np.sum((A[M]/B[M])-np.log(A[M]/B[M])-1)
+            mask = M & (A > 0.0)
+            a = A[mask]
+            b = B[mask]
+            cost = np.sum((a / b) - np.log(a / b) - 1)
     else:
-        cost = np.sum((A[M]/B[M])-np.log(A[M]/B[M])-1)
+        mask = M & (A > 0.0)
+        a = A[mask]
+        b = B[mask]
+        cost = np.sum((a / b) - np.log(a / b) - 1)
     return cost
 
 
-def nmf_mu_is(X, k, n=100, l=1E-3, seed=None, r=20):
+def nmf_mu_is(
+    X: NDArray[np.floating], k: int, n: int = 100, tol: float = 1e-3, seed: int | None = None, r: int = 20, eval_every: int = 10
+) -> tuple[NDArray[np.floating], NDArray[np.floating], NDArray[np.floating], float]:
+    """
+    NMF via Multiplicative Updates (MU) minimizing the Itakura-Saito (IS) divergence.
+
+    Optimizes the Itakura-Saito objective:
+
+    $$D_{\\text{IS}}(X \\parallel W H) = \\sum_{i,j} M_{ij} \\left( \\frac{X_{ij}}{(W H)_{ij}} - \\log \\frac{X_{ij}}{(W H)_{ij}} - 1 \\right)$$
+
+    Multiplicative update steps:
+
+    $$H \\leftarrow H \\odot \\sqrt{ \\frac{W^T \\left( \\frac{M \\odot X}{(W H)^2} \\right)}{W^T \\left( \\frac{M}{W H} \\right)} }$$
+
+    $$W \\leftarrow W \\odot \\sqrt{ \\frac{\\left( \\frac{M \\odot X}{(W H)^2} \\right) H^T}{\\left( \\frac{M}{W H} \\right) H^T} }$$
+
+    Args:
+        X (np.ndarray): Target matrix of shape (m, n).
+        k (int): Number of latent components.
+        n (int): Maximum number of iterations. Defaults to 100.
+        tol (float): Convergence tolerance. Defaults to 1e-3.
+        seed (int, optional): Random seed. Defaults to None.
+        r (int): Number of restarts for initial factor selection. Defaults to 20.
+        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
+
+    Returns:
+        tuple: (rec, W, H, cost)
+            - rec (np.ndarray): Reconstructed matrix of shape (m, n).
+            - W (np.ndarray): Left factor matrix of shape (m, k).
+            - H (np.ndarray): Right factor matrix of shape (k, n).
+            - cost (float): Final IS cost.
+    """
+
     if isinstance(seed, int):
         np.random.seed(seed)
-    
+
     # Create a Mask
-    #M = X > 0.0
     M = np.isnan(X)
+    X = X.copy()
     X[M] = 0
     M = ~M
 
@@ -244,59 +450,498 @@ def nmf_mu_is(X, k, n=100, l=1E-3, seed=None, r=20):
     eps = np.finfo(float).eps
 
     # Create W and H
-    #avg = np.sqrt(X.mean() / k)
-
     W = np.abs(np.random.uniform(size=(rows, k)))
-    #W = avg * np.maximum(W, eps)
     W = np.maximum(W, eps)
-    W = np.divide(W, k*W.max())
+    W = np.divide(W, k * W.max())
 
     H = np.abs(np.random.uniform(size=(k, columns)))
-    #H = avg * np.maximum(H, eps)
     H = np.maximum(H, eps)
-    H = np.divide(H, k*H.max())
+    H = np.divide(H, k * H.max())
+
+    cost_mask = M & (X > 0.0)
 
     if seed is None:
-        Xr = W @ H
-        cost = cost_is(X, Xr, M)
+        rec = W @ H
+        cost = cost_is(X, rec, M)
 
         for _ in range(r):
             Wt = np.abs(np.random.uniform(size=(rows, k)))
-            #W = avg * np.maximum(W, eps)
             Wt = np.maximum(Wt, eps)
-            Wt = np.divide(Wt, k*Wt.max())
+            Wt = np.divide(Wt, k * Wt.max())
 
             Ht = np.abs(np.random.uniform(size=(k, columns)))
-            #H = avg * np.maximum(H, eps)
             Ht = np.maximum(Ht, eps)
-            Ht = np.divide(Ht, k*Ht.max())
+            Ht = np.divide(Ht, k * Ht.max())
 
-            Xr = Wt @ Ht
-            cost_temp = cost_is(X, Xr, M)
+            rec_temp = Wt @ Ht
+            cost_temp = cost_is(X, rec_temp, M)
 
             if cost_temp < cost:
                 W = Wt
                 H = Ht
                 cost = cost_temp
 
-    # W = W .* sqrt.(((V ./ (W*H))*(H./sum(W*H,1))') ./(sum((H./sum(W*H,1))',1)))
-    # H = H .* sqrt.(((W ./ sum(W*H,2))' * (V./(W*H)) ./ (sum((W ./ sum(W*H,2))',2))))
+    X_zero = X == 0
+    rec = W @ H
+    cost = cost_is(X, rec, cost_mask)
 
-    for _ in range(n):
-        I = np.where(X==0, W@H, X)
-        #H = H * (W.T @ (I / (W@H)) / np.sum(W.T, axis=1)[:,None])
-        H = H * np.sqrt(((W / np.sum(W@H, axis=1)[:,None]).T @ (I / (W@H)) / (np.sum((W / np.sum(W@H, axis=1)[:,None]).T, axis=1)[:,None])))
+    for idx in range(n):
+        # 1. Update H
+        X_imp = np.where(X_zero, rec, X)
+        ratio = X_imp / rec
+        rec_sum_rows = rec.sum(axis=1)[:, None]
+        W_scaled = W / rec_sum_rows
+        numerator = W_scaled.T @ ratio
+        denominator = W_scaled.sum(axis=0)[:, None]
+        H = H * np.sqrt(numerator / denominator)
         H = np.maximum(H, eps)
 
-        I = np.where(X==0, W@H, X)
-        #W = W * ((I / (W@H) @ H.T) / np.sum(H.T, axis=0))
-        W = W * np.sqrt(((I / (W@H)) @ (H / np.sum(W@H, axis=0)).T) / (np.sum((H / np.sum(W@H, axis=0)).T, axis = 0)))
+        # 2. Update W
+        rec = W @ H
+        X_imp = np.where(X_zero, rec, X)
+        ratio = X_imp / rec
+        rec_sum_cols = rec.sum(axis=0)
+        H_scaled = H / rec_sum_cols
+        numerator = ratio @ H_scaled.T
+        denominator = H_scaled.sum(axis=1)
+        W = W * np.sqrt(numerator / denominator)
         W = np.maximum(W, eps)
 
-        Xr = W @ H
-        cost = cost_is(X, Xr)
-        if cost <= l:
-            break
+        # 3. Cost
+        rec = W @ H
+        if idx % eval_every == 0:
+            cost = cost_is(X, rec, cost_mask)
+            if cost <= tol:
+                break
+    else:
+        rec = W @ H
+        cost = cost_is(X, rec, cost_mask)
 
     X[~M] = np.nan
-    return Xr, W, H, cost
+    return rec, W, H, cost
+
+
+def nmf_als(
+    X: NDArray[np.floating], k: int, n: int = 1000, tol: float = 1e-3, seed: int | None = None, eval_every: int = 10
+) -> tuple[NDArray[np.floating], NDArray[np.floating], NDArray[np.floating], float]:
+    """
+    Alternating Least Squares (ALS) NMF with missing values imputation.
+
+    Minimizes the Frobenius norm. During each iteration, missing entries (and observed zeros)
+    are imputed dynamically from the current reconstruction:
+
+    $$X_{\\text{imp}} = M \\odot X + (1 - M) \\odot (W H)$$
+
+    Then, least squares solutions are computed alternately:
+
+    $$W \\leftarrow \\max\\left(\\epsilon, X_{\\text{imp}} H^T (H H^T + 10^{-9} I_k)^{-1}\\right)$$
+
+    $$H \\leftarrow \\max\\left(\\epsilon, (W^T W + 10^{-9} I_k)^{-1} W^T X_{\\text{imp}}\\right)$$
+
+    Args:
+        X (np.ndarray): Target matrix of shape (m, n).
+        k (int): Number of latent components.
+        n (int): Maximum number of iterations. Defaults to 1000.
+        tol (float): Convergence tolerance. Defaults to 1e-3.
+        seed (int, optional): Random seed. Defaults to None.
+        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
+
+    Returns:
+        tuple: (rec, W, H, cost)
+            - rec (np.ndarray): Reconstructed matrix.
+            - W (np.ndarray): Left factor matrix.
+            - H (np.ndarray): Right factor matrix.
+            - cost (float): Final Frobenius cost.
+    """
+
+    if isinstance(seed, int):
+        np.random.seed(seed)
+    rows, columns = X.shape
+    eps = np.finfo(float).eps
+    W = np.abs(np.random.uniform(size=(rows, k)))
+    W = np.maximum(W, eps)
+    W = np.divide(W, k * W.max())
+    H = np.abs(np.random.uniform(size=(k, columns)))
+    H = np.maximum(H, eps)
+    H = np.divide(H, k * H.max())
+
+    M = np.isnan(X)
+    X = X.copy()
+    X[M] = 0
+    M = ~M
+    M_float = M.astype(float)
+    X_zero = X == 0
+
+    rec = W @ H
+    cost = cost_fb(X, rec, M_float)
+
+    for idx in range(n):
+        # Imputation
+        rec = W @ H
+        X_imp = np.where(X_zero, rec, X)
+
+        # Update W
+        W = np.maximum(eps, np.linalg.solve(H @ H.T + 1e-9 * np.eye(k), H @ X_imp.T).T)
+
+        # Imputation
+        rec = W @ H
+        X_imp = np.where(X_zero, rec, X)
+
+        # Update H
+        H = np.maximum(eps, np.linalg.solve(W.T @ W + 1e-9 * np.eye(k), W.T @ X_imp))
+
+        if idx % eval_every == 0:
+            rec = W @ H
+            cost = cost_fb(X, rec, M_float)
+            if cost <= tol:
+                break
+    else:
+        rec = W @ H
+        cost = cost_fb(X, rec, M_float)
+
+    X[~M] = np.nan
+    return rec, W, H, cost
+
+
+def nmf_hals(
+    X: NDArray[np.floating], k: int, n: int = 1000, tol: float = 1e-3, seed: int | None = None, eval_every: int = 10
+) -> tuple[NDArray[np.floating], NDArray[np.floating], NDArray[np.floating], float]:
+    """
+    Hierarchical Alternating Least Squares (HALS) NMF with missing values imputation.
+
+    Minimizes the Frobenius norm. Computes dynamic imputation as in ALS, then updates
+    factors column-by-column (for W) and row-by-row (for H):
+
+    $$W_{*, i} \\leftarrow \\max\\left(\\epsilon, W_{*, i} + \\frac{(X_{\\text{imp}} H^T)_{*, i} - W (H H^T)_{*, i}}{(H H^T)_{i,i}}\\right)$$
+
+    $$H_{i, *} \\leftarrow \\max\\left(\\epsilon, H_{i, *} + \\frac{(W^T X_{\\text{imp}})_{i, *} - (W^T W)_{i, *} H}{(W^T W)_{i,i}}\\right)$$
+
+    Args:
+        X (np.ndarray): Target matrix of shape (m, n).
+        k (int): Number of latent components.
+        n (int): Maximum number of iterations. Defaults to 1000.
+        tol (float): Convergence tolerance. Defaults to 1e-3.
+        seed (int, optional): Random seed. Defaults to None.
+        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
+
+    Returns:
+        tuple: (rec, W, H, cost)
+            - rec (np.ndarray): Reconstructed matrix.
+            - W (np.ndarray): Left factor matrix.
+            - H (np.ndarray): Right factor matrix.
+            - cost (float): Final Frobenius cost.
+    """
+
+    if isinstance(seed, int):
+        np.random.seed(seed)
+    rows, columns = X.shape
+    eps = np.finfo(float).eps
+    W = np.abs(np.random.uniform(size=(rows, k)))
+    W = np.maximum(W, eps)
+    W = np.divide(W, k * W.max())
+    H = np.abs(np.random.uniform(size=(k, columns)))
+    H = np.maximum(H, eps)
+    H = np.divide(H, k * H.max())
+
+    M = np.isnan(X)
+    X = X.copy()
+    X[M] = 0
+    M = ~M
+    M_float = M.astype(float)
+    X_zero = X == 0
+
+    rec = W @ H
+    cost = cost_fb(X, rec, M_float)
+
+    for idx in range(n):
+        # Imputation
+        rec = W @ H
+        X_imp = np.where(X_zero, rec, X)
+
+        # Update W column-wise
+        A = H @ H.T
+        B = X_imp @ H.T
+        for i in range(k):
+            denom = A[i, i] if A[i, i] > eps else eps
+            W[:, i] = np.maximum(eps, W[:, i] + (B[:, i] - W @ A[:, i]) / denom)
+
+        # Imputation
+        rec = W @ H
+        X_imp = np.where(X_zero, rec, X)
+
+        # Update H row-wise
+        C = W.T @ W
+        D = W.T @ X_imp
+        for i in range(k):
+            denom = C[i, i] if C[i, i] > eps else eps
+            H[i, :] = np.maximum(eps, H[i, :] + (D[i, :] - C[i, :] @ H) / denom)
+
+        if idx % eval_every == 0:
+            rec = W @ H
+            cost = cost_fb(X, rec, M_float)
+            if cost <= tol:
+                break
+    else:
+        rec = W @ H
+        cost = cost_fb(X, rec, M_float)
+
+    X[~M] = np.nan
+    return rec, W, H, cost
+
+
+def nmf_als_kl(
+    X: NDArray[np.floating], k: int, n: int = 100, tol: float = 1e-3, seed: int | None = None, r: int = 20, eval_every: int = 10
+) -> tuple[NDArray[np.floating], NDArray[np.floating], NDArray[np.floating], float]:
+    """
+    Alternating Least Squares (ALS) NMF with Kullback-Leibler (KL) divergence and missing values.
+
+    Delegates to the alternating multiplicative update implementation (`nmf_mu_kl`), which
+    guarantees stability and convergence for the KL objective.
+
+    Args:
+        X (np.ndarray): Target matrix of shape (m, n).
+        k (int): Number of latent components.
+        n (int): Maximum number of iterations. Defaults to 100.
+        tol (float): Convergence tolerance. Defaults to 1e-3.
+        seed (int, optional): Random seed. Defaults to None.
+        r (int): Restarts. Defaults to 20.
+        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
+
+    Returns:
+        tuple: (rec, W, H, cost)
+    """
+    return nmf_mu_kl(X, k, n, tol, seed, r, eval_every)
+
+
+def nmf_als_is(
+    X: NDArray[np.floating], k: int, n: int = 100, tol: float = 1e-3, seed: int | None = None, r: int = 20, eval_every: int = 10
+) -> tuple[NDArray[np.floating], NDArray[np.floating], NDArray[np.floating], float]:
+    """
+    Alternating Least Squares (ALS) NMF with Itakura-Saito (IS) divergence and missing values.
+
+    Delegates to the alternating multiplicative update implementation (`nmf_mu_is`), which
+    guarantees stability and convergence for the IS objective.
+
+    Args:
+        X (np.ndarray): Target matrix of shape (m, n).
+        k (int): Number of latent components.
+        n (int): Maximum number of iterations. Defaults to 100.
+        tol (float): Convergence tolerance. Defaults to 1e-3.
+        seed (int, optional): Random seed. Defaults to None.
+        r (int): Restarts. Defaults to 20.
+        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
+
+    Returns:
+        tuple: (rec, W, H, cost)
+    """
+    return nmf_mu_is(X, k, n, tol, seed, r, eval_every)
+
+
+def nmf_hals_kl(
+    X: NDArray[np.floating], k: int, n: int = 100, tol: float = 1e-3, seed: int | None = None, r: int = 20, eval_every: int = 10
+) -> tuple[NDArray[np.floating], NDArray[np.floating], NDArray[np.floating], float]:
+    """
+    Hierarchical Alternating Least Squares (HALS) NMF minimizing the KL divergence.
+
+    Uses coordinate descent combined with Majorization-Minimization update steps.
+    For each component $i \\in \\{1, \\dots, k\\}$, updates factors sequentially:
+
+    $$H_{i, *} \\leftarrow H_{i, *} \\odot \\frac{W_{*, i}^T \\left( \\frac{X_{\\text{imp}}}{W H} \\right)}{\\sum_{j} W_{j, i}}$$
+
+    $$W_{*, i} \\leftarrow W_{*, i} \\odot \\frac{\\left( \\frac{X_{\\text{imp}}}{W H} \\right) H_{i, *}^T}{\\sum_{j} H_{i, j}}$$
+
+    where $X_{\\text{imp}}$ is the dynamically imputed target matrix.
+
+    Args:
+        X (np.ndarray): Target matrix of shape (m, n).
+        k (int): Number of latent components.
+        n (int): Maximum number of iterations. Defaults to 100.
+        tol (float): Convergence tolerance. Defaults to 1e-3.
+        seed (int, optional): Random seed. Defaults to None.
+        r (int): Restarts for initialization. Defaults to 20.
+        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
+
+    Returns:
+        tuple: (rec, W, H, cost)
+            - rec (np.ndarray): Reconstructed matrix.
+            - W (np.ndarray): Left factor matrix.
+            - H (np.ndarray): Right factor matrix.
+            - cost (float): Final KL cost.
+    """
+
+    if isinstance(seed, int):
+        np.random.seed(seed)
+
+    M = np.isnan(X)
+    X = X.copy()
+    X[M] = 0
+    M = ~M
+    X_zero = X == 0
+
+    rows, columns = X.shape
+    eps = np.finfo(float).eps
+
+    W = np.abs(np.random.uniform(size=(rows, k)))
+    W = np.maximum(W, eps)
+    W = np.divide(W, k * W.max())
+
+    H = np.abs(np.random.uniform(size=(k, columns)))
+    H = np.maximum(H, eps)
+    H = np.divide(H, k * H.max())
+
+    cost_mask = M & (X > 0.0)
+
+    if seed is None:
+        rec = W @ H
+        cost = cost_kl(X, rec, M)
+        for _ in range(r):
+            Wt = np.abs(np.random.uniform(size=(rows, k)))
+            Wt = np.maximum(Wt, eps)
+            Wt = np.divide(Wt, k * Wt.max())
+            Ht = np.abs(np.random.uniform(size=(k, columns)))
+            Ht = np.maximum(Ht, eps)
+            Ht = np.divide(Ht, k * Ht.max())
+            rec_temp = Wt @ Ht
+            cost_temp = cost_kl(X, rec_temp, M)
+            if cost_temp < cost:
+                W = Wt
+                H = Ht
+                cost = cost_temp
+
+    rec = W @ H
+    cost = cost_kl(X, rec, cost_mask)
+
+    for idx in range(n):
+        # Update H row-by-row
+        for i in range(k):
+            rec = W @ H
+            X_imp = np.where(X_zero, rec, X)
+            ratio = X_imp / rec
+            H[i, :] = H[i, :] * (W[:, i] @ ratio / (W[:, i].sum() + eps))
+            H[i, :] = np.maximum(H[i, :], eps)
+
+        # Update W column-by-column
+        for i in range(k):
+            rec = W @ H
+            X_imp = np.where(X_zero, rec, X)
+            ratio = X_imp / rec
+            W[:, i] = W[:, i] * (ratio @ H[i, :] / (H[i, :].sum() + eps))
+            W[:, i] = np.maximum(W[:, i], eps)
+
+        if idx % eval_every == 0:
+            rec = W @ H
+            cost = cost_kl(X, rec, cost_mask)
+            if cost <= tol:
+                break
+    else:
+        rec = W @ H
+        cost = cost_kl(X, rec, cost_mask)
+
+    X[~M] = np.nan
+    return rec, W, H, cost
+
+
+def nmf_hals_is(
+    X: NDArray[np.floating], k: int, n: int = 100, tol: float = 1e-3, seed: int | None = None, r: int = 20, eval_every: int = 10
+) -> tuple[NDArray[np.floating], NDArray[np.floating], NDArray[np.floating], float]:
+    """
+    Hierarchical Alternating Least Squares (HALS) NMF minimizing the Itakura-Saito (IS) divergence.
+
+    Uses coordinate descent combined with Majorization-Minimization update steps.
+    For each component $i \\in \\{1, \\dots, k\\}$, updates factors sequentially:
+
+    $$H_{i, *} \\leftarrow H_{i, *} \\odot \\sqrt{\\frac{W_{*, i}^T \\left( \\frac{X_{\\text{imp}}}{(W H)^2} \\right)}{W_{*, i}^T \\left( \\frac{1}{W H} \\right)}}$$
+
+    $$W_{*, i} \\leftarrow W_{*, i} \\odot \\sqrt{\\frac{\\left( \\frac{X_{\\text{imp}}}{(W H)^2} \\right) H_{i, *}^T}{\\left( \\frac{1}{W H} \\right) H_{i, *}^T}}$$
+
+    where $X_{\\text{imp}}$ is the dynamically imputed target matrix.
+
+    Args:
+        X (np.ndarray): Target matrix of shape (m, n).
+        k (int): Number of latent components.
+        n (int): Maximum number of iterations. Defaults to 100.
+        tol (float): Convergence tolerance. Defaults to 1e-3.
+        seed (int, optional): Random seed. Defaults to None.
+        r (int): Restarts for initialization. Defaults to 20.
+        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
+
+    Returns:
+        tuple: (rec, W, H, cost)
+            - rec (np.ndarray): Reconstructed matrix.
+            - W (np.ndarray): Left factor matrix.
+            - H (np.ndarray): Right factor matrix.
+            - cost (float): Final IS cost.
+    """
+
+    if isinstance(seed, int):
+        np.random.seed(seed)
+
+    M = np.isnan(X)
+    X = X.copy()
+    X[M] = 0
+    M = ~M
+    X_zero = X == 0
+
+    rows, columns = X.shape
+    eps = np.finfo(float).eps
+
+    W = np.abs(np.random.uniform(size=(rows, k)))
+    W = np.maximum(W, eps)
+    W = np.divide(W, k * W.max())
+
+    H = np.abs(np.random.uniform(size=(k, columns)))
+    H = np.maximum(H, eps)
+    H = np.divide(H, k * H.max())
+
+    cost_mask = M & (X > 0.0)
+
+    if seed is None:
+        rec = W @ H
+        cost = cost_is(X, rec, M)
+        for _ in range(r):
+            Wt = np.abs(np.random.uniform(size=(rows, k)))
+            Wt = np.maximum(Wt, eps)
+            Wt = np.divide(Wt, k * Wt.max())
+            Ht = np.abs(np.random.uniform(size=(k, columns)))
+            Ht = np.maximum(Ht, eps)
+            Ht = np.divide(Ht, k * Ht.max())
+            rec_temp = Wt @ Ht
+            cost_temp = cost_is(X, rec_temp, M)
+            if cost_temp < cost:
+                W = Wt
+                H = Ht
+                cost = cost_temp
+
+    rec = W @ H
+    cost = cost_is(X, rec, cost_mask)
+
+    for idx in range(n):
+        # Update H row-by-row
+        for i in range(k):
+            rec = W @ H
+            X_imp = np.where(X_zero, rec, X)
+            numerator = W[:, i] @ (X_imp / (rec**2))
+            denominator = W[:, i] @ (1.0 / rec)
+            H[i, :] = H[i, :] * np.sqrt(numerator / (denominator + eps))
+            H[i, :] = np.maximum(H[i, :], eps)
+
+        # Update W column-by-column
+        for i in range(k):
+            rec = W @ H
+            X_imp = np.where(X_zero, rec, X)
+            numerator = (X_imp / (rec**2)) @ H[i, :]
+            denominator = (1.0 / rec) @ H[i, :]
+            W[:, i] = W[:, i] * np.sqrt(numerator / (denominator + eps))
+            W[:, i] = np.maximum(W[:, i], eps)
+
+        if idx % eval_every == 0:
+            rec = W @ H
+            cost = cost_is(X, rec, cost_mask)
+            if cost <= tol:
+                break
+    else:
+        rec = W @ H
+        cost = cost_is(X, rec, cost_mask)
+
+    X[~M] = np.nan
+    return rec, W, H, cost
