@@ -14,8 +14,6 @@ from .core import (
     cost_kl,
     nmf_als,
     nmf_hals,
-    nmf_hals_is,
-    nmf_hals_kl,
     nmf_mu,
     nmf_mu_is,
     nmf_mu_kl,
@@ -32,6 +30,4 @@ __all__ = [
     "nmf_mu_is",
     "nmf_als",
     "nmf_hals",
-    "nmf_hals_kl",
-    "nmf_hals_is",
 ]

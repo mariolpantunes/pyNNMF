@@ -40,12 +40,12 @@ To get the best speed and accuracy (matrix completion / imputation) out of `pyNN
 | Noise Type | Recommended Cost Function | Recommended Solver | Rationale |
 | :--- | :--- | :--- | :--- |
 | **Additive / Gaussian** | Frobenius Norm (`cost_fb`) | `nmf_als` (or `nmf_mu`) | Frobenius norm represents the true negative log-likelihood for Gaussian noise. ALS converges fast. |
-| **Count / Poisson / Sparse** | KL Divergence (`cost_kl`) | `nmf_mu_kl` (or `nmf_als_kl`) | KL divergence corresponds to Poisson likelihood and enforces sparsity naturally. |
-| **Scale-Invariant / Audio** | IS Divergence (`cost_is`) | `nmf_mu_is` (or `nmf_als_is`) | IS divergence measures relative rather than absolute errors, protecting small-magnitude values. |
+| **Count / Poisson / Sparse** | KL Divergence (`cost_kl`) | `nmf_mu(cost='kl')` (or `nmf_mu_kl`) | KL divergence corresponds to Poisson likelihood and enforces sparsity naturally. |
+| **Scale-Invariant / Audio** | IS Divergence (`cost_is`) | `nmf_mu(cost='is')` (or `nmf_mu_is`) | IS divergence measures relative rather than absolute errors, protecting small-magnitude values. |
 
 ### 2. By Missingness Ratio
-- **Low-to-Moderate Missingness (< 30%)**: **HALS** solvers (`nmf_hals`, `nmf_hals_kl`, `nmf_hals_is`) are recommended. They update variables coordinate-wise and converge to the lowest training objective minima very fast.
-- **High Missingness (> 30%) / Highly Noisy**: **MU** and **ALS** solvers (`nmf_mu`, `nmf_mu_kl`, `nmf_mu_is`, `nmf_als`) are recommended. Their slower, diagonally-scaled update trajectories act as an **implicit regularizer**, preventing overfitting on the small number of observed entries.
+- **Low-to-Moderate Missingness (< 30%)**: **HALS** solver (`nmf_hals`) is recommended. It updates variables coordinate-wise and converges to the lowest training objective minima very fast. (Note: HALS only supports Frobenius norm).
+- **High Missingness (> 30%) / Highly Noisy**: **MU** and **ALS** solvers (`nmf_mu`, `nmf_als`, `rwnmf`) are recommended. Their slower, diagonally-scaled update trajectories act as an **implicit regularizer**, preventing overfitting on the small number of observed entries.
 
 ---
 

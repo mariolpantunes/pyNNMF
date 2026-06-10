@@ -2,16 +2,15 @@
 # coding: utf-8
 
 __author__ = "Mário Antunes"
-__version__ = "0.1"
-__email__ = "mariolpantunes@gmail.com"
+__version__ = "0.2.0"
+__email__ = "mario.antunes@ua.pt"
 __status__ = "Development"
-__license__ = "MIT"
 
 
 import argparse
 import logging
 
-import exectimeit.timeit as et
+import exectimeit as et
 import numpy as np
 
 import pynnmf

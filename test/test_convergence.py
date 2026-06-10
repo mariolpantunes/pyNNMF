@@ -12,7 +12,7 @@ __status__ = "Development"
 import unittest
 import numpy as np
 import numpy.typing as np_typing
-from pynnmf import nmf_mu, nmf_mu_kl, nmf_mu_is, nmf_als, nmf_hals, nmf_hals_kl, nmf_hals_is
+from pynnmf import nmf_mu, nmf_mu_kl, nmf_mu_is, nmf_als, nmf_hals
 
 class TestConvergence(unittest.TestCase):
     m: int = 0
@@ -63,21 +63,13 @@ class TestConvergence(unittest.TestCase):
         from pynnmf.core import cost_is
         self.check_monotonicity(nmf_mu_is, cost_is)
 
-    def test_als_frobenius_monotonicity(self):
+    def test_als_monotonicity(self):
         from pynnmf.core import cost_fb
         self.check_monotonicity(nmf_als, cost_fb)
 
-    def test_hals_frobenius_monotonicity(self):
+    def test_hals_monotonicity(self):
         from pynnmf.core import cost_fb
         self.check_monotonicity(nmf_hals, cost_fb)
-
-    def test_hals_kl_monotonicity(self):
-        from pynnmf.core import cost_kl
-        self.check_monotonicity(nmf_hals_kl, cost_kl)
-
-    def test_hals_is_monotonicity(self):
-        from pynnmf.core import cost_is
-        self.check_monotonicity(nmf_hals_is, cost_is)
 
 if __name__ == "__main__":
     unittest.main()

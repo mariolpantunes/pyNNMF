@@ -1,6 +1,31 @@
 [build-system]
-requires = ['setuptools>=42']
-build-backend = 'setuptools.build_meta'
+requires = ["setuptools>=61.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyNNMF"
+version = "0.2.0"
+authors = [
+    { name = "Mário Antunes", email = "mario.antunes@ua.pt" }
+]
+description = "Library for computing Non-Negative Matrix Factorisation with missing values imputation."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy>=1.26.4",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"pynnmf" = ["py.typed"]
 
 [tool.pyright]
 venvPath = "."
@@ -8,6 +33,3 @@ venv = "venv"
 
 [tool.ruff]
 line-length = 120
-
-[tool.setuptools.package-data]
-"pynnmf" = ["py.typed"]

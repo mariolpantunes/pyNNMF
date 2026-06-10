@@ -12,7 +12,7 @@ __status__ = "Development"
 
 
 import logging
-import typing
+from typing import Literal, Optional, Callable, Tuple
 
 import numpy as np
 import numpy.typing as np_typing
@@ -31,8 +31,8 @@ def rwnmf(
     num_iter: int = 1000,
     seed: int | None = None,
     eval_every: int = 10,
-    init: typing.Literal["random", "nndsvd", "svd_impute"]
-    | typing.Callable[
+    init: Literal["random", "nndsvd", "svd_impute"]
+    | Callable[
         [np_typing.NDArray[np.floating], int], tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating]]
     ] = "random",
 ) -> tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], float]:
@@ -141,108 +141,14 @@ def cost_fb(
         float: Frobenius cost.
     """
     if m is None:
-        if np.any(np.isnan(a)):
-            m_mask = np.isnan(a)
-            a_copy = a.copy()
-            a_copy[m_mask] = 0
-            m_not = ~m_mask
-            cost = np.linalg.norm((m_not * a_copy) - (m_not * b), ord="fro")
-        else:
-            m_not = a > 0.0
-            cost = np.linalg.norm((m_not * a) - (m_not * b), ord="fro")
+        m_mask = np.isnan(a)
+        a_copy = a.copy()
+        a_copy[m_mask] = 0
+        m_not = (~m_mask).astype(float)
+        cost = np.linalg.norm((m_not * a_copy) - (m_not * b), ord="fro")
     else:
         cost = np.linalg.norm((m * a) - (m * b), ord="fro")
     return float(cost)
-
-
-def nmf_mu(
-    x: np_typing.NDArray[np.floating],
-    k: int,
-    n: int = 1000,
-    alpha: float = 1e-3,
-    tol: float = 1e-3,
-    seed: int | None = None,
-    eval_every: int = 10,
-    init: typing.Literal["random", "nndsvd", "svd_impute"]
-    | typing.Callable[
-        [np_typing.NDArray[np.floating], int], tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating]]
-    ] = "random",
-    callback: typing.Callable[[int, float], None] | None = None,
-) -> tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], float]:
-    """
-    Non-Negative Matrix Factorization (NMF) via Multiplicative Updates (MU) using Frobenius norm.
-
-    Optimizes the Frobenius norm objective function with L2 regularization:
-
-    $$D_{\\text{Fro}}(X \\parallel W H) = \\frac{1}{2} \\| M \\odot (X - W H) \\|_F^2 + \\frac{\\alpha}{2} (\\|W\\|_F^2 + \\|H\\|_F^2)$$
-
-    Multiplicative update steps:
-
-    $$W \\leftarrow W \\odot \frac{(M \\odot X) H^T}{(M \\odot (W H)) H^T + \\alpha W}$$
-
-    $$H \\leftarrow H \\odot \frac{W^T (M \\odot X)}{W^T (M \\odot (W H)) + \\alpha H}$$
-
-    Args:
-        x (np.ndarray): Target matrix of shape (m, n).
-        k (int): Number of latent components.
-        n (int): Maximum number of iterations. Defaults to 1000.
-        alpha (float): L2 regularization parameter. Defaults to 1e-3.
-        tol (float): Convergence tolerance. Defaults to 1e-3.
-        seed (int, optional): Random seed. Defaults to None.
-        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
-        init (str or callable): Initialization method ('random', 'nndsvd', 'svd_impute')
-                                or a custom callable. Defaults to 'random'.
-
-    Returns:
-        tuple: (rec, w, h, cost)
-            - rec (np.ndarray): Reconstructed matrix of shape (m, n).
-            - w (np.ndarray): Left factor matrix of shape (m, k).
-            - h (np.ndarray): Right factor matrix of shape (k, n).
-            - cost (float): Final Frobenius cost.
-    """
-    eps = np.finfo(float).eps
-
-    w, h = initialize_nmf(x, k, method=init, seed=seed)
-
-    m_mask = np.isnan(x)
-    x_copy = x.copy()
-    x_copy[m_mask] = 0
-    m_not = ~m_mask
-    m_float = m_not.astype(float)
-
-    # Precompute constant matrices
-    m_x: np_typing.NDArray[np.floating] = m_float * x_copy
-    rec: np_typing.NDArray[np.floating] = w @ h
-    cost = cost_fb(x_copy, rec, m_float)
-
-    for idx in range(n):
-        # 1. Update w
-        rec = w @ h
-        rec_masked: np_typing.NDArray[np.floating] = rec * m_float
-        w = w * ((m_x @ h.T) / (rec_masked @ h.T + alpha * w))
-        w = np.maximum(w, eps)
-
-        # 2. Update h
-        rec = w @ h
-        rec_masked: np_typing.NDArray[np.floating] = rec * m_float
-        h = h * ((w.T @ m_x) / (w.T @ rec_masked + alpha * h))
-        h = np.maximum(h, eps)
-
-        # Evaluation and callback
-        rec = w @ h
-        cost = cost_fb(x_copy, rec, m_float)
-        if callback:
-            callback(idx, cost)
-
-        if idx % eval_every == 0:
-            if cost <= tol:
-                break
-    else:
-        rec = w @ h
-        cost = cost_fb(x_copy, rec, m_float)
-
-    x_copy[~m_not] = np.nan
-    return rec, w, h, float(cost)
 
 
 def cost_kl(
@@ -262,125 +168,13 @@ def cost_kl(
         float: KL divergence cost.
     """
     if m is None:
-        if np.any(np.isnan(a)):
-            m_mask = np.isnan(a)
-            m = ~m_mask
-        else:
-            m = a > 0.0
+        m = ~np.isnan(a)
     mask = m & (a > 0.0)
     a_vals = a[mask]
     b_vals = b[mask]
-    return float(np.sum(a_vals * np.log(a_vals / b_vals) - a_vals + b_vals))
-
-
-def nmf_mu_kl(
-    x: np_typing.NDArray[np.floating],
-    k: int,
-    n: int = 100,
-    tol: float = 1e-3,
-    seed: int | None = None,
-    r: int = 20,
-    eval_every: int = 10,
-    init: typing.Literal["random", "nndsvd", "svd_impute"]
-    | typing.Callable[
-        [np_typing.NDArray[np.floating], int], tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating]]
-    ] = "random",
-    callback: typing.Callable[[int, float], None] | None = None,
-) -> tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], float]:
-    """
-    NMF via Multiplicative Updates (MU) minimizing the Kullback-Leibler (KL) divergence.
-
-    Optimizes the generalized KL divergence objective:
-
-    $$D_{\\text{KL}}(X \\parallel W H) = \\sum_{i,j} M_{ij} \\left( X_{ij} \\log \\frac{X_{ij}}{(W H)_{ij}} - X_{ij} + (W H)_{ij} \\right)$$
-
-    Multiplicative update steps:
-
-    $$H \\leftarrow H \\odot \\frac{W^T \\left( \\frac{M \\odot X}{W H} \\right)}{W^T M}$$
-
-    $$W \\leftarrow W \\odot \\frac{\\left( \\frac{M \\odot X}{W H} \\right) H^T}{M H^T}$$
-
-    Args:
-        x (np.ndarray): Target matrix of shape (m, n).
-        k (int): Number of latent components.
-        n (int): Maximum number of iterations. Defaults to 100.
-        tol (float): Convergence tolerance. Defaults to 1e-3.
-        seed (int, optional): Random seed. Defaults to None.
-        r (int): Number of restarts for initial factor selection. Defaults to 20.
-        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
-        init (str or callable): Initialization method ('random', 'nndsvd', 'svd_impute')
-                                or a custom callable. Defaults to 'random'.
-        callback (callable, optional): Function called at each iteration with (iteration, cost). Defaults to None.
-
-    Returns:
-        tuple: (rec, w, h, cost)
-            - rec (np.ndarray): Reconstructed matrix of shape (m, n).
-            - w (np.ndarray): Left factor matrix of shape (m, k).
-            - h (np.ndarray): Right factor matrix of shape (k, n).
-            - cost (float): Final KL cost.
-    """
-    eps = np.finfo(float).eps
-
-    w, h = initialize_nmf(x, k, method=init, seed=seed)
-
-    # Create a Mask
-    m_mask = np.isnan(x)
-    x_copy = x.copy()
-    x_copy[m_mask] = 0
-    m_not = ~m_mask
-
-    cost_mask = m_not & (x_copy > 0.0)
-
-    if seed is None and init == "random":
-        rec = w @ h
-        cost = cost_kl(x_copy, rec, m_not)
-
-        for _ in range(r):
-            wt, ht = initialize_nmf(x, k, method="random")
-            rec_temp = wt @ ht
-            cost_temp = cost_kl(x_copy, rec_temp, m_not)
-
-            if cost_temp < cost:
-                w = wt
-                h = ht
-                cost = cost_temp
-
-    x_zero: np_typing.NDArray[np.bool_] = x_copy == 0
-    rec: np_typing.NDArray[np.floating] = w @ h
-    cost = cost_kl(x_copy, rec, cost_mask)
-
-    for idx in range(n):
-        # 1. Update h
-        rec = w @ h
-        x_imp: np_typing.NDArray[np.floating] = np.where(x_zero, rec, x_copy)
-        ratio: np_typing.NDArray[np.floating] = x_imp / rec
-        w_sum: np_typing.NDArray[np.floating] = w.sum(axis=0)[:, None]
-        h = h * (w.T @ ratio / w_sum)
-        h = np.maximum(h, eps)
-
-        # 2. Update w
-        rec = w @ h
-        x_imp = np.where(x_zero, rec, x_copy)
-        ratio = x_imp / rec
-        h_sum: np_typing.NDArray[np.floating] = h.sum(axis=1)
-        w = w * ((ratio @ h.T) / h_sum)
-        w = np.maximum(w, eps)
-
-        # Evaluation and callback
-        rec = w @ h
-        cost = cost_kl(x_copy, rec, cost_mask)
-        if callback:
-            callback(idx, cost)
-
-        if idx % eval_every == 0:
-            if cost <= tol:
-                break
-    else:
-        rec = w @ h
-        cost = cost_kl(x_copy, rec, cost_mask)
-
-    x_copy[~m_not] = np.nan
-    return rec, w, h, float(cost)
+    term_pos = a_vals * np.log(a_vals / b_vals) - a_vals
+    term_b = b[m]
+    return float(np.sum(term_pos) + np.sum(term_b))
 
 
 def cost_is(
@@ -400,15 +194,278 @@ def cost_is(
         float: IS divergence cost.
     """
     if m is None:
-        if np.any(np.isnan(a)):
-            m_mask = np.isnan(a)
-            m = ~m_mask
-        else:
-            m = a > 0.0
+        m = ~np.isnan(a)
     mask = m & (a > 0.0)
     a_vals = a[mask]
     b_vals = b[mask]
     return float(np.sum((a_vals / b_vals) - np.log(a_vals / b_vals) - 1))
+
+
+
+
+def nmf_mu(
+    x: np_typing.NDArray[np.floating],
+    k: int,
+    cost: Literal["frobenius", "kl", "is"] = "frobenius",
+    alpha: float = 1e-3,
+    tol: float = 1e-3,
+    n: int = 1000,
+    seed: int | None = None,
+    eval_every: int = 10,
+    init: Literal["random", "nndsvd", "svd_impute"]
+    | Callable[
+        [np_typing.NDArray[np.floating], int], tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating]]
+    ] = "random",
+    callback: Optional[Callable[[int, float], None]] = None,
+) -> Tuple[np.typing.NDArray[np.floating], np.typing.NDArray[np.floating], np.typing.NDArray[np.floating], float]:
+    """
+    Non-Negative Matrix Factorization (NMF) via Multiplicative Updates.
+
+    This is the main NMF solver with configurable cost function.
+
+    Args:
+        x: Target matrix of shape (m, n)
+        k: Number of latent components
+        cost: Cost function: "frobenius", "kl", or "is"
+        alpha: L2 regularization parameter (only used for 'frobenius' cost)
+        tol: Convergence tolerance
+        n: Maximum iterations
+        seed: Random seed
+        eval_every: Evaluation frequency
+        init: Initialization method
+        callback: Function called with (iteration, cost)
+
+    Returns:
+        Tuple of (rec, w, h, cost)
+
+    Raises:
+        ValueError: If cost is not "frobenius", "kl", or "is"
+    """
+    if cost == "frobenius":
+        return _nmf_mu_frobenius(x, k, alpha, tol, n, seed, eval_every, init, callback)
+    elif cost == "kl":
+        return _nmf_mu_kl(x, k, alpha, tol, n, seed, eval_every, init, callback)
+    elif cost == "is":
+        return _nmf_mu_is(x, k, alpha, tol, n, seed, eval_every, init, callback)
+    else:
+        raise ValueError(f"cost must be 'frobenius', 'kl', or 'is', got '{cost}'")
+
+
+def _nmf_mu_frobenius(
+    x: np_typing.NDArray[np.floating],
+    k: int,
+    alpha: float,
+    tol: float,
+    n: int,
+    seed: int | None,
+    eval_every: int,
+    init: Literal["random", "nndsvd", "svd_impute"]
+    | Callable[
+        [np_typing.NDArray[np.floating], int], tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating]]
+    ],
+    callback: Optional[Callable[[int, float], None]],
+) -> Tuple[np.typing.NDArray[np.floating], np.typing.NDArray[np.floating], np.typing.NDArray[np.floating], float]:
+    """
+    Internal implementation for Frobenius norm Multiplicative Updates.
+
+    Optimizes the Frobenius norm objective function with missing values and L2 regularization:
+
+    $$D_{\\text{Fro}}(X \\parallel W H) = \\frac{1}{2} \\| M \\odot (X - W H) \\|_F^2 + \\frac{\\alpha}{2} (\\|W\\|_F^2 + \\|H\\|_F^2)$$
+
+    where $M$ is a binary mask representing observed values (1 if observed, 0 if NaN).
+
+    Update rules:
+
+    $$W \\leftarrow \\max\\left(\\epsilon, W \\odot \\frac{(M \\odot X) H^T}{(M \\odot (W H)) H^T + \\alpha W}\\right)$$
+
+    $$H \\leftarrow \\max\\left(\\epsilon, H \\odot \\frac{W^T (M \\odot X)}{W^T (M \\odot (W H)) + \\alpha H}\\right)$$
+    """
+    eps = 1e-9
+    w, h = initialize_nmf(x, k, method=init, seed=seed)
+    m_mask = np.isnan(x)
+    x_copy = x.copy()
+    x_copy[m_mask] = 0
+    m_not = ~m_mask
+    m_float = m_not.astype(float)
+    m_x: np_typing.NDArray[np.floating] = m_float * x_copy
+    rec: np_typing.NDArray[np.floating] = w @ h
+    cost_val = cost_fb(x_copy, rec, m_float)
+    for idx in range(n):
+        rec = w @ h
+        rec_masked: np_typing.NDArray[np.floating] = rec * m_float
+        w = np.maximum(eps, w * ((m_x @ h.T) / (rec_masked @ h.T + alpha * w)))
+        rec = w @ h
+        rec_masked = rec * m_float
+        h = np.maximum(eps, h * ((w.T @ m_x) / (w.T @ rec_masked + alpha * h)))
+        rec = w @ h
+        cost_val = cost_fb(x_copy, rec, m_float)
+        if callback:
+            callback(idx, cost_val)
+        if idx % eval_every == 0:
+            if cost_val <= tol:
+                break
+    else:
+        rec = w @ h
+        cost_val = cost_fb(x_copy, rec, m_float)
+    x_copy[~m_not] = np.nan
+    return rec, w, h, float(cost_val)
+
+
+def _nmf_mu_kl(
+    x: np_typing.NDArray[np.floating],
+    k: int,
+    alpha: float,
+    tol: float,
+    n: int,
+    seed: int | None,
+    eval_every: int,
+    init: Literal["random", "nndsvd", "svd_impute"]
+    | Callable[
+        [np_typing.NDArray[np.floating], int], tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating]]
+    ],
+    callback: Optional[Callable[[int, float], None]],
+) -> Tuple[np.typing.NDArray[np.floating], np.typing.NDArray[np.floating], np.typing.NDArray[np.floating], float]:
+    """
+    Internal implementation for Kullback-Leibler (KL) divergence Multiplicative Updates.
+
+    Optimizes the KL divergence objective function with missing values imputed dynamically:
+
+    $$D_{\\text{KL}}(X \\parallel W H) = \\sum_{i,j} M_{ij} \\left( X_{ij} \\log \\frac{X_{ij}}{(W H)_{ij}} - X_{ij} + (W H)_{ij} \\right)$$
+
+    where NaNs in $X$ are dynamically imputed:
+
+    $$X_{\\text{imp}} = M \\odot X + (1 - M) \\odot (W H)$$
+
+    Update rules:
+
+    $$H \\leftarrow \\max\\left(\\epsilon, H \\odot \\frac{W^T \\frac{X_{\\text{imp}}}{W H}}{W^T \\mathbf{1}}\\right)$$
+
+    $$W \\leftarrow \\max\\left(\\epsilon, W \\odot \\frac{\\frac{X_{\\text{imp}}}{W H} H^T}{\\mathbf{1} H^T}\\right)$$
+    """
+    eps = 1e-9
+    w, h = initialize_nmf(x, k, method=init, seed=seed)
+    m_mask = np.isnan(x)
+    x_copy = x.copy()
+    x_copy[m_mask] = 0
+    m_not = ~m_mask
+    cost_mask = m_not
+    x_zero: np_typing.NDArray[np.bool_] = m_mask
+    rec: np_typing.NDArray[np.floating] = w @ h
+    cost_val = cost_kl(x_copy, rec, cost_mask)
+    for idx in range(n):
+        rec = w @ h
+        x_imp: np_typing.NDArray[np.floating] = np.where(x_zero, rec, x_copy)
+        ratio: np_typing.NDArray[np.floating] = x_imp / rec
+        w_sum: np_typing.NDArray[np.floating] = w.sum(axis=0)[:, None]
+        h = np.maximum(eps, h * (w.T @ ratio / w_sum))
+        rec = w @ h
+        x_imp = np.where(x_zero, rec, x_copy)
+        ratio = x_imp / rec
+        h_sum: np_typing.NDArray[np.floating] = h.sum(axis=1)
+        w = np.maximum(eps, w * ((ratio @ h.T) / h_sum))
+        rec = w @ h
+        cost_val = cost_kl(x_copy, rec, cost_mask)
+        if callback:
+            callback(idx, cost_val)
+        if idx % eval_every == 0:
+            if cost_val <= tol:
+                break
+    else:
+        rec = w @ h
+        cost_val = cost_kl(x_copy, rec, cost_mask)
+    x_copy[~m_not] = np.nan
+    return rec, w, h, float(cost_val)
+
+
+def _nmf_mu_is(
+    x: np_typing.NDArray[np.floating],
+    k: int,
+    alpha: float,
+    tol: float,
+    n: int,
+    seed: int | None,
+    eval_every: int,
+    init: Literal["random", "nndsvd", "svd_impute"]
+    | Callable[
+        [np_typing.NDArray[np.floating], int], tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating]]
+    ],
+    callback: Optional[Callable[[int, float], None]],
+) -> Tuple[np.typing.NDArray[np.floating], np.typing.NDArray[np.floating], np.typing.NDArray[np.floating], float]:
+    """
+    Internal implementation for Itakura-Saito (IS) divergence Multiplicative Updates.
+
+    Optimizes the IS divergence objective function with missing values imputed dynamically:
+
+    $$D_{\\text{IS}}(X \\parallel W H) = \\sum_{i,j} M_{ij} \\left( \\frac{X_{ij}}{(W H)_{ij}} - \\log \\frac{X_{ij}}{(W H)_{ij}} - 1 \\right)$$
+
+    where NaNs in $X$ are dynamically imputed:
+
+    $$X_{\\text{imp}} = M \\odot X + (1 - M) \\odot (W H)$$
+
+    Update rules:
+
+    $$H \\leftarrow \\max\\left(\\epsilon, H \\odot \\sqrt{\\frac{W^T \\left( \\frac{X_{\\text{imp}}}{(W H)^2} \\right)}{W^T \\left( \\frac{1}{W H} \\right)}}\\right)$$
+
+    $$W \\leftarrow \\max\\left(\\epsilon, W \\odot \\sqrt{\\frac{\\left( \\frac{X_{\\text{imp}}}{(W H)^2} \\right) H^T}{\\left( \\frac{1}{W H} \\right) H^T}}\\right)$$
+    """
+    eps = 1e-9
+    w, h = initialize_nmf(x, k, method=init, seed=seed)
+    m_mask = np.isnan(x)
+    x_copy = x.copy()
+    x_copy[m_mask] = 0
+    m_not = ~m_mask
+    cost_mask = m_not & (x_copy > 0.0)
+    x_zero: np_typing.NDArray[np.bool_] = m_mask
+    rec: np_typing.NDArray[np.floating] = w @ h
+    cost_val = cost_is(x_copy, rec, cost_mask)
+    for idx in range(n):
+        rec = w @ h
+        x_imp: np_typing.NDArray[np.floating] = np.where(x_zero, rec, x_copy)
+        ratio: np_typing.NDArray[np.floating] = x_imp / rec
+        rec_sum_rows: np_typing.NDArray[np.floating] = rec.sum(axis=1)[:, None]
+        w_scaled: np_typing.NDArray[np.floating] = w / rec_sum_rows
+        numerator: np_typing.NDArray[np.floating] = w_scaled.T @ ratio
+        denominator: np_typing.NDArray[np.floating] = w_scaled.sum(axis=0)[:, None]
+        h = np.maximum(eps, h * np.sqrt(numerator / denominator))
+        rec = w @ h
+        x_imp = np.where(x_zero, rec, x_copy)
+        ratio = x_imp / rec
+        rec_sum_cols: np_typing.NDArray[np.floating] = rec.sum(axis=0)
+        h_scaled: np_typing.NDArray[np.floating] = h / rec_sum_cols
+        numerator = ratio @ h_scaled.T
+        denominator = h_scaled.sum(axis=1)
+        w = np.maximum(eps, w * np.sqrt(numerator / denominator))
+        rec = w @ h
+        cost_val = cost_is(x_copy, rec, cost_mask)
+        if callback:
+            callback(idx, cost_val)
+        if idx % eval_every == 0:
+            if cost_val <= tol:
+                break
+    else:
+        rec = w @ h
+        cost_val = cost_is(x_copy, rec, cost_mask)
+    x_copy[~m_not] = np.nan
+    return rec, w, h, float(cost_val)
+
+
+def nmf_mu_kl(
+    x: np_typing.NDArray[np.floating],
+    k: int,
+    n: int = 100,
+    tol: float = 1e-3,
+    seed: int | None = None,
+    r: int = 20,
+    eval_every: int = 10,
+    init: Literal["random", "nndsvd", "svd_impute"]
+    | Callable[
+        [np_typing.NDArray[np.floating], int], tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating]]
+    ] = "random",
+    callback: Callable[[int, float], None] | None = None,
+) -> Tuple[np.typing.NDArray[np.floating], np.typing.NDArray[np.floating], np.typing.NDArray[np.floating], float]:
+    """Deprecated: Use nmf_mu(cost='kl', ...) instead."""
+    return _nmf_mu_kl(x, k, alpha=1e-3, tol=tol, n=n, seed=seed, 
+                     eval_every=eval_every, init=init, callback=callback)
 
 
 def nmf_mu_is(
@@ -419,114 +476,15 @@ def nmf_mu_is(
     seed: int | None = None,
     r: int = 20,
     eval_every: int = 10,
-    init: typing.Literal["random", "nndsvd", "svd_impute"]
-    | typing.Callable[
+    init: Literal["random", "nndsvd", "svd_impute"]
+    | Callable[
         [np_typing.NDArray[np.floating], int], tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating]]
     ] = "random",
-    callback: typing.Callable[[int, float], None] | None = None,
-) -> tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], float]:
-    """
-    NMF via Multiplicative Updates (MU) minimizing the Itakura-Saito (IS) divergence.
-
-    Optimizes the Itakura-Saito objective:
-
-    $$D_{\\text{IS}}(X \\parallel W H) = \\sum_{i,j} M_{ij} \\left( \\frac{X_{ij}}{(W H)_{ij}} - \\log \\frac{X_{ij}}{(W H)_{ij}} - 1 \\right)$$
-
-    Multiplicative update steps:
-
-    $$H \\leftarrow H \\odot \\sqrt{ \\frac{W^T \\left( \\frac{M \\odot X}{(W H)^2} \\right)}{W^T \\left( \\frac{M}{W H} \\right)} }$$
-
-    $$W \\leftarrow W \\odot \\sqrt{ \\frac{\\left( \\frac{M \\odot X}{(W H)^2} \\right) H^T}{\\left( \\frac{M}{W H} \\right) H^T} }$$
-
-    Args:
-        x (np.ndarray): Target matrix of shape (m, n).
-        k (int): Number of latent components.
-        n (int): Maximum number of iterations. Defaults to 100.
-        tol (float): Convergence tolerance. Defaults to 1e-3.
-        seed (int, optional): Random seed. Defaults to None.
-        r (int): Number of restarts for initial factor selection. Defaults to 20.
-        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
-        init (str or callable): Initialization method ('random', 'nndsvd', 'svd_impute')
-                                or a custom callable. Defaults to 'random'.
-        callback (callable, optional): Function called at each iteration with (iteration, cost). Defaults to None.
-
-    Returns:
-        tuple: (rec, w, h, cost)
-            - rec (np.ndarray): Reconstructed matrix of shape (m, n).
-            - w (np.ndarray): Left factor matrix of shape (m, k).
-            - h (np.ndarray): Right factor matrix of shape (k, n).
-            - cost (float): Final IS cost.
-    """
-    eps = np.finfo(float).eps
-
-    w, h = initialize_nmf(x, k, method=init, seed=seed)
-
-    # Create a Mask
-    m_mask = np.isnan(x)
-    x_copy = x.copy()
-    x_copy[m_mask] = 0
-    m_not = ~m_mask
-
-    cost_mask = m_not & (x_copy > 0.0)
-
-    if seed is None and init == "random":
-        rec = w @ h
-        cost = cost_is(x_copy, rec, m_not)
-
-        for _ in range(r):
-            wt, ht = initialize_nmf(x, k, method="random")
-            rec_temp = wt @ ht
-            cost_temp = cost_is(x_copy, rec_temp, m_not)
-
-            if cost_temp < cost:
-                w = wt
-                h = ht
-                cost = cost_temp
-
-    x_zero: np_typing.NDArray[np.bool_] = x_copy == 0
-    rec: np_typing.NDArray[np.floating] = w @ h
-    cost = cost_is(x_copy, rec, cost_mask)
-
-    for idx in range(n):
-        # 1. Update h
-        rec = w @ h
-        x_imp: np_typing.NDArray[np.floating] = np.where(x_zero, rec, x_copy)
-        ratio: np_typing.NDArray[np.floating] = x_imp / rec
-        rec_sum_rows: np_typing.NDArray[np.floating] = rec.sum(axis=1)[:, None]
-        w_scaled: np_typing.NDArray[np.floating] = w / rec_sum_rows
-        numerator: np_typing.NDArray[np.floating] = w_scaled.T @ ratio
-        denominator: np_typing.NDArray[np.floating] = w_scaled.sum(axis=0)[:, None]
-        h: np_typing.NDArray[np.floating] = h * np.sqrt(numerator / denominator)
-        h = np.maximum(h, eps)
-
-        # 2. Update w
-        rec = w @ h
-        x_imp = np.where(x_zero, rec, x_copy)
-        ratio = x_imp / rec
-        rec_sum_cols: np_typing.NDArray[np.floating] = rec.sum(axis=0)
-        h_scaled: np_typing.NDArray[np.floating] = h / rec_sum_cols
-        numerator = ratio @ h_scaled.T
-        denominator = h_scaled.sum(axis=1)
-        w: np_typing.NDArray[np.floating] = w * np.sqrt(numerator / denominator)
-        w = np.maximum(w, eps)
-
-        # 3. Evaluation and callback
-        rec = w @ h
-        cost = cost_is(x_copy, rec, cost_mask)
-        if callback:
-            callback(idx, cost)
-
-        if idx % eval_every == 0:
-            if cost <= tol:
-                break
-    else:
-        rec = w @ h
-        cost = cost_is(x_copy, rec, cost_mask)
-
-    x_copy[~m_not] = np.nan
-    return rec, w, h, float(cost)
-
-
+    callback: Callable[[int, float], None] | None = None,
+) -> Tuple[np.typing.NDArray[np.floating], np.typing.NDArray[np.floating], np.typing.NDArray[np.floating], float]:
+    """Deprecated: Use nmf_mu(cost='is', ...) instead."""
+    return _nmf_mu_is(x, k, alpha=1e-3, tol=tol, n=n, seed=seed, 
+                     eval_every=eval_every, init=init, callback=callback)
 def nmf_als(
     x: np_typing.NDArray[np.floating],
     k: int,
@@ -534,16 +492,16 @@ def nmf_als(
     tol: float = 1e-3,
     seed: int | None = None,
     eval_every: int = 10,
-    init: typing.Literal["random", "nndsvd", "svd_impute"]
-    | typing.Callable[
+    init: Literal["random", "nndsvd", "svd_impute"]
+    | Callable[
         [np_typing.NDArray[np.floating], int], tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating]]
     ] = "random",
-    callback: typing.Callable[[int, float], None] | None = None,
+    callback: Callable[[int, float], None] | None = None,
 ) -> tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], float]:
     """
     Alternating Least Squares (ALS) NMF with missing values imputation.
 
-    Minimizes the Frobenius norm. During each iteration, missing entries (and observed zeros)
+    Minimizes the Frobenius norm. During each iteration, missing entries (NaNs)
     are imputed dynamically from the current reconstruction:
 
     $$X_{\\text{imp}} = M \\odot X + (1 - M) \\odot (W H)$$
@@ -572,7 +530,7 @@ def nmf_als(
             - h (np.ndarray): Right factor matrix.
             - cost (float): Final Frobenius cost.
     """
-    eps = np.finfo(float).eps
+    eps = 1e-9
     w, h = initialize_nmf(x, k, method=init, seed=seed)
 
     m_mask = np.isnan(x)
@@ -580,7 +538,7 @@ def nmf_als(
     x_copy[m_mask] = 0
     m_not = ~m_mask
     m_float = m_not.astype(float)
-    x_zero = x_copy == 0
+    x_zero = m_mask
 
     rec: np_typing.NDArray[np.floating] = w @ h
     cost = cost_fb(x_copy, rec, m_float)
@@ -624,17 +582,17 @@ def nmf_hals(
     tol: float = 1e-3,
     seed: int | None = None,
     eval_every: int = 10,
-    init: typing.Literal["random", "nndsvd", "svd_impute"]
-    | typing.Callable[
+    init: Literal["random", "nndsvd", "svd_impute"]
+    | Callable[
         [np_typing.NDArray[np.floating], int], tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating]]
     ] = "random",
-    callback: typing.Callable[[int, float], None] | None = None,
+    callback: Callable[[int, float], None] | None = None,
 ) -> tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], float]:
     """
     Hierarchical Alternating Least Squares (HALS) NMF with missing values imputation.
 
-    Minimizes the Frobenius norm. Computes dynamic imputation as in ALS, then updates
-    factors column-by-column (for w) and row-by-row (for h):
+    Minimizes the Frobenius norm. Computes dynamic imputation as in ALS (imputing only NaNs),
+    then updates factors column-by-column (for w) and row-by-row (for h):
 
     $$W_{*, i} \\leftarrow \\max\\left(\\epsilon, W_{*, i} + \\frac{(X_{\\text{imp}} H^T)_{*, i} - W (H H^T)_{*, i}}{(H H^T)_{i,i}}\\right)$$
 
@@ -658,7 +616,7 @@ def nmf_hals(
             - h (np.ndarray): Right factor matrix.
             - cost (float): Final Frobenius cost.
     """
-    eps = np.finfo(float).eps
+    eps = 1e-9
     w, h = initialize_nmf(x, k, method=init, seed=seed)
 
     m_mask = np.isnan(x)
@@ -666,7 +624,7 @@ def nmf_hals(
     x_copy[m_mask] = 0
     m_not = ~m_mask
     m_float = m_not.astype(float)
-    x_zero = x_copy == 0
+    x_zero = m_mask
 
     rec = w @ h
     cost = cost_fb(x_copy, rec, m_float)
@@ -706,171 +664,6 @@ def nmf_hals(
     else:
         rec = w @ h
         cost = cost_fb(x_copy, rec, m_float)
-
-    x_copy[~m_not] = np.nan
-    return rec, w, h, float(cost)
-
-def nmf_hals_kl(
-    x: np_typing.NDArray[np.floating],
-    k: int,
-    n: int = 100,
-    tol: float = 1e-3,
-    seed: int | None = None,
-    eval_every: int = 10,
-    init: typing.Literal["random", "nndsvd", "svd_impute"]
-    | typing.Callable[
-        [np_typing.NDArray[np.floating], int], tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating]]
-    ] = "random",
-    callback: typing.Callable[[int, float], None] | None = None,
-) -> tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], float]:
-    """
-    Hierarchical Alternating Least Squares (HALS) NMF minimizing the KL divergence.
-
-    For KL divergence, this implementation uses Multiplicative Updates (MU) for the
-    entire factor matrix, which is the standard monotonic approach for missing values.
-
-    Args:
-        x (np.ndarray): Target matrix of shape (m, n).
-        k (int): Number of latent components.
-        n (int): Maximum number of iterations. Defaults to 100.
-        tol (float): Convergence tolerance. Defaults to 1e-3.
-        seed (int, optional): Random seed. Defaults to None.
-        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
-        init (str or callable): Initialization method ('random', 'nndsvd', 'svd_impute')
-                                or a custom callable. Defaults to 'random'.
-        callback (callable, optional): Function called at each iteration with (iteration, cost). Defaults to None.
-
-    Returns:
-        tuple: (rec, w, h, cost)
-    """
-    eps = np.finfo(float).eps
-    w, h = initialize_nmf(x, k, method=init, seed=seed)
-
-    m_mask = np.isnan(x)
-    x_copy = x.copy()
-    x_copy[m_mask] = 0
-    m_not = ~m_mask
-    m_float = m_not.astype(float)
-    cost_mask = m_not & (x_copy > 0.0)
-
-    rec = w @ h
-    cost = cost_kl(x_copy, rec, cost_mask)
-
-    for idx in range(n):
-        # Update W
-        rec = w @ h
-        ratio: np_typing.NDArray[np.floating] = np.where(m_not, x_copy / np.maximum(rec, eps), 0.0)
-        # Denominator: sum_j M_ij H_kj
-        denom_w: np_typing.NDArray[np.floating] = m_float @ h.T
-        w: np_typing.NDArray[np.floating] = w * ((ratio @ h.T) / (denom_w + eps))
-        w = np.maximum(w, eps)
-
-        # Update H
-        rec = w @ h
-        ratio = np.where(m_not, x_copy / np.maximum(rec, eps), 0.0)
-        # Denominator: sum_i M_ij W_ik
-        denom_h: np_typing.NDArray[np.floating] = w.T @ m_float
-        h: np_typing.NDArray[np.floating] = h * ((w.T @ ratio) / (denom_h + eps))
-        h = np.maximum(h, eps)
-
-        # Evaluation and callback
-        rec: np_typing.NDArray[np.floating] = w @ h
-        cost = cost_kl(x_copy, rec, cost_mask)
-        if callback:
-            callback(idx, cost)
-
-        if idx % eval_every == 0:
-            if cost <= tol:
-                break
-    else:
-        rec = w @ h
-        cost = cost_kl(x_copy, rec, cost_mask)
-
-    x_copy[~m_not] = np.nan
-    return rec, w, h, float(cost)
-
-
-def nmf_hals_is(
-    x: np_typing.NDArray[np.floating],
-    k: int,
-    n: int = 100,
-    tol: float = 1e-3,
-    seed: int | None = None,
-    eval_every: int = 10,
-    init: typing.Literal["random", "nndsvd", "svd_impute"]
-    | typing.Callable[
-        [np_typing.NDArray[np.floating], int], tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating]]
-    ] = "random",
-    callback: typing.Callable[[int, float], None] | None = None,
-) -> tuple[np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], np_typing.NDArray[np.floating], float]:
-    """
-    Hierarchical Alternating Least Squares (HALS) NMF minimizing the IS divergence.
-
-    Implements coordinate-descent style updates for IS divergence.
-
-    Args:
-        x (np.ndarray): Target matrix of shape (m, n).
-        k (int): Number of latent components.
-        n (int): Maximum number of iterations. Defaults to 100.
-        tol (float): Convergence tolerance. Defaults to 1e-3.
-        seed (int, optional): Random seed. Defaults to None.
-        eval_every (int): Frequency of checking early-stopping criteria. Defaults to 10.
-        init (str or callable): Initialization method ('random', 'nndsvd', 'svd_impute')
-                                or a custom callable. Defaults to 'random'.
-        callback (callable, optional): Function called at each iteration with (iteration, cost). Defaults to None.
-
-    Returns:
-        tuple: (rec, w, h, cost)
-    """
-    eps = np.finfo(float).eps
-    w, h = initialize_nmf(x, k, method=init, seed=seed)
-
-    m_mask = np.isnan(x)
-    x_copy = x.copy()
-    x_copy[m_mask] = 0
-    m_not = ~m_mask
-    cost_mask = m_not & (x_copy > 0.0)
-
-    rec = w @ h
-    cost = cost_is(x_copy, rec, cost_mask)
-
-    for idx in range(n):
-        # Update W column by column
-        for j in range(k):
-            rec_sq = np.maximum(rec**2, eps)
-            rec_inv = 1.0 / np.maximum(rec, eps)
-            
-            num = (np.where(m_not, x_copy / rec_sq, 0.0)) @ h[j, :]
-            den = (np.where(m_not, rec_inv, 0.0)) @ h[j, :]
-            
-            w_old = w[:, j].copy()
-            w[:, j] = np.maximum(eps, w[:, j] * np.sqrt(num / (den + eps)))
-            rec += np.outer(w[:, j] - w_old, h[j, :])
-
-        # Update H row by row
-        for i in range(k):
-            rec_sq = np.maximum(rec**2, eps)
-            rec_inv = 1.0 / np.maximum(rec, eps)
-            
-            num = (w.T @ np.where(m_not, x_copy / rec_sq, 0.0))[i, :]
-            den = (w.T @ np.where(m_not, rec_inv, 0.0))[i, :]
-            
-            h_old = h[i, :].copy()
-            h[i, :] = np.maximum(eps, h[i, :] * np.sqrt(num / (den + eps)))
-            rec += w[:, i] @ (h[i, :] - h_old)
-
-        # Evaluation and callback
-        rec = w @ h
-        cost = cost_is(x_copy, rec, cost_mask)
-        if callback:
-            callback(idx, cost)
-
-        if idx % eval_every == 0:
-            if cost <= tol:
-                break
-    else:
-        rec = w @ h
-        cost = cost_is(x_copy, rec, cost_mask)
 
     x_copy[~m_not] = np.nan
     return rec, w, h, float(cost)
