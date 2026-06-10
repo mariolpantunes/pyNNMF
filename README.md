@@ -1,4 +1,4 @@
-# <img src="assets/logo.svg" alt="logo" width="128" height="128" align="middle"> pyNNMF - Non-Negative Matrix Factorization (NMF)
+# <img src="assets/logo.svg" alt="logo" width="128" height="128" align="middle"> pyNNMF - Non-Negative Matrix Factorization
 
 ![PyPI - Version](https://img.shields.io/pypi/v/pyNNMF)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pyNNMF)
