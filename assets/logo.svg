@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="128" height="128">
+  <!-- Background -->
+  <rect width="100" height="100" fill="#2E3440" rx="8"/>
+
+  <!-- Matrix X (3x3, blue #88C0D0) -->
+  <rect x="1" y="36" width="8" height="8" rx="2" fill="#88C0D0"/>
+  <rect x="11" y="36" width="8" height="8" rx="2" fill="#88C0D0"/>
+  <rect x="21" y="36" width="8" height="8" rx="2" fill="#88C0D0"/>
+  <rect x="1" y="46" width="8" height="8" rx="2" fill="#88C0D0"/>
+  <rect x="11" y="46" width="8" height="8" rx="2" fill="#88C0D0"/>
+  <rect x="21" y="46" width="8" height="8" rx="2" fill="#88C0D0"/>
+  <rect x="1" y="56" width="8" height="8" rx="2" fill="#88C0D0"/>
+  <rect x="11" y="56" width="8" height="8" rx="2" fill="#88C0D0"/>
+  <rect x="21" y="56" width="8" height="8" rx="2" fill="#88C0D0"/>
+
+  <!-- Missing Values (Nord Red #BF616A) -->
+  <path d="M 5 42 L 13 48 M 13 42 L 5 48" stroke="#BF616A" stroke-width="2" stroke-linecap="round"/>
+  <path d="M 15 52 L 23 58 M 23 52 L 15 58" stroke="#BF616A" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Approximation Sign (≈) -->
+  <path d="M 31 47 Q 34 44 37 47 T 41 47" fill="none" stroke="#ECEFF4" stroke-width="3.0" stroke-linecap="round"/>
+  <path d="M 31 53 Q 34 50 37 53 T 41 53" fill="none" stroke="#ECEFF4" stroke-width="3.0" stroke-linecap="round"/>
+
+  <!-- Matrix W (3x2, green #A3BE8C) -->
+  <rect x="43" y="36" width="8" height="8" rx="2" fill="#A3BE8C"/>
+  <rect x="53" y="36" width="8" height="8" rx="2" fill="#A3BE8C"/>
+  <rect x="43" y="46" width="8" height="8" rx="2" fill="#A3BE8C"/>
+  <rect x="53" y="46" width="8" height="8" rx="2" fill="#A3BE8C"/>
+  <rect x="43" y="56" width="8" height="8" rx="2" fill="#A3BE8C"/>
+  <rect x="53" y="56" width="8" height="8" rx="2" fill="#A3BE8C"/>
+
+  <!-- Multiplication Sign (×) -->
+  <path d="M 63 47 L 69 53 M 69 47 L 63 53" fill="none" stroke="#ECEFF4" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- Matrix H (2x3, yellow #EBCB8B) -->
+  <rect x="71" y="41" width="8" height="8" rx="2" fill="#EBCB8B"/>
+  <rect x="81" y="41" width="8" height="8" rx="2" fill="#EBCB8B"/>
+  <rect x="91" y="41" width="8" height="8" rx="2" fill="#EBCB8B"/>
+  <rect x="71" y="51" width="8" height="8" rx="2" fill="#EBCB8B"/>
+  <rect x="81" y="51" width="8" height="8" rx="2" fill="#EBCB8B"/>
+  <rect x="91" y="51" width="8" height="8" rx="2" fill="#EBCB8B"/>
+</svg>
