@@ -90,6 +90,12 @@ npx pyright src/ test/ examples/
 
 ---
 
+## Documentation
+
+Detailed package documentation is hosted on [GitHub Pages](https://mariolpantunes.github.io/pyNNMF/)
+
+---
+
 ## Authors
 
 * **Mário Antunes** - [mariolpantunes](https://github.com/mariolpantunes)
